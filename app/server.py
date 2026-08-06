@@ -3,6 +3,7 @@ import os
 import sys
 import uuid
 from pathlib import Path
+from flask_cors import CORS
 
 from flask import Flask, jsonify, request
 from dotenv import load_dotenv
@@ -19,17 +20,20 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
+FRONTEND_DIR = os.path.join(BASE_DIR, "web")
 UPLOAD_DIR = os.path.join(BASE_DIR, "data", "uploads")
 Path(UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
 
-app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
+app = Flask(__name__)
+CORS(app)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 
 
 @app.route("/")
 def home():
-    return app.send_static_file("index.html")
+    return jsonify({
+        "message": "TrainAI Backend is running"
+    })
 
 
 @app.route("/api/health")
@@ -153,4 +157,8 @@ def list_messages(conversation_id):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8501, debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 8501)),
+        debug=False
+    )
