@@ -6,79 +6,124 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import {
   createConversationApi,
   deleteConversationApi,
+  deleteDocumentApi,
   fetchConversations,
   fetchCurrentUser,
+  fetchDocumentsApi,
   fetchMessages,
   sendMessageApi,
   updateConversationApi,
   uploadPdfApi,
 } from "@/lib/api-client";
-import { groupConversationsByDate, mockDocuments, mockUser } from "@/lib/mock-data";
+import { groupConversationsByDate } from "@/lib/history";
 import type {
   Conversation,
   Document,
-  DocumentStatus,
   HistoryGroup,
   Message,
   User,
 } from "@/lib/types";
-import { generateId } from "@/lib/utils";
+import { errorMessage, generateId, shortTitle } from "@/lib/utils";
+
+/** Must match MAX_UPLOAD_MB in app/server.py. */
+export const MAX_PDF_MB = 16;
+
+export interface ChatError {
+  message: string;
+}
 
 interface ChatAppContextValue {
-  user: User;
+  user: User | null;
   sidebarCollapsed: boolean;
   mobileSidebarOpen: boolean;
-  selectedModel: string;
+  docsOpen: boolean;
   activeConversationId: string | null;
   conversations: Conversation[];
   documents: Document[];
   historyGroups: HistoryGroup[];
   activeMessages: Message[];
   activeConversation: Conversation | null;
-  isAssistantTyping: boolean;
+  /** Waiting for an answer in some conversation; blocks sending another question. */
+  isSending: boolean;
+  /** The question waiting for an answer in the conversation on screen. */
+  pendingQuestion: string | null;
   isLoadingHistory: boolean;
+  isLoadingMessages: boolean;
+  isLoadingDocuments: boolean;
   historyError: string | null;
+  chatError: ChatError | null;
+  documentsError: string | null;
+  highlightedDocId: string | null;
+  showSource: (fileId: string) => void;
   toggleSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
-  setSelectedModel: (model: string) => void;
-  createNewChat: () => Promise<void>;
+  setDocsOpen: (open: boolean) => void;
+  createNewChat: () => void;
   selectConversation: (id: string) => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string) => Promise<boolean>;
+  dismissChatError: () => void;
   uploadPdf: (file: File) => Promise<void>;
-  removeDocument: (id: string) => void;
+  removeDocument: (id: string) => Promise<void>;
+  dismissDocument: (id: string) => void;
 }
 
 const ChatAppContext = createContext<ChatAppContextValue | null>(null);
 
+function isPdf(file: File): boolean {
+  return (
+    file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+  );
+}
+
 export function ChatAppProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User>(mockUser);
+  const [user, setUser] = useState<User | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState("TrainAI GPT");
+  const [docsOpen, setDocsOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeMessages, setActiveMessages] = useState<Message[]>([]);
-  const [documents, setDocuments] = useState<Document[]>(mockDocuments);
+  const [documents, setDocuments] = useState<Document[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<
     string | null
   >(null);
-  const [isAssistantTyping, setIsAssistantTyping] = useState(false);
+  // One question in flight at a time; it belongs to the conversation it was asked in.
+  const [sending, setSending] = useState<{
+    conversationId: string | null;
+    content: string;
+  } | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<ChatError | null>(null);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
+  const [highlightedDocId, setHighlightedDocId] = useState<string | null>(
+    null,
+  );
+  const highlightTimer = useRef<number | undefined>(undefined);
+
+  // The conversation the UI shows right now; async results for any other one are dropped.
+  const activeIdRef = useRef<string | null>(null);
+  // Bumped whenever the user moves to another chat.
+  const navCountRef = useRef(0);
+  const setActive = useCallback((id: string | null) => {
+    activeIdRef.current = id;
+    setActiveConversationId(id);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      setIsLoadingHistory(true);
-      setHistoryError(null);
       try {
         const [userData, convList] = await Promise.all([
           fetchCurrentUser(),
@@ -89,9 +134,7 @@ export function ChatAppProvider({ children }: { children: ReactNode }) {
         setConversations(convList);
       } catch (e) {
         if (!cancelled) {
-          setHistoryError(
-            e instanceof Error ? e.message : "Không kết nối được MongoDB",
-          );
+          setHistoryError(errorMessage(e, "Không kết nối được MongoDB"));
         }
       } finally {
         if (!cancelled) setIsLoadingHistory(false);
@@ -102,6 +145,26 @@ export function ChatAppProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  const loadDocuments = useCallback(async (conversationId: string) => {
+    setIsLoadingDocuments(true);
+    setDocumentsError(null);
+    try {
+      const next = await fetchDocumentsApi(conversationId);
+      if (activeIdRef.current !== conversationId) return;
+      // Keep rows still uploading or failed; the server does not know them yet.
+      setDocuments((prev) => [
+        ...prev.filter((d) => d.status !== "ready"),
+        ...next,
+      ]);
+    } catch (e) {
+      if (activeIdRef.current === conversationId) {
+        setDocumentsError(errorMessage(e, "Không tải được danh sách PDF"));
+      }
+    } finally {
+      if (activeIdRef.current === conversationId) setIsLoadingDocuments(false);
+    }
   }, []);
 
   const activeConversation = useMemo(
@@ -118,49 +181,78 @@ export function ChatAppProvider({ children }: { children: ReactNode }) {
     setSidebarCollapsed((prev) => !prev);
   }, []);
 
-  const createNewChat = useCallback(async () => {
-    try {
-      const conversation = await createConversationApi();
-      setConversations((prev) => [conversation, ...prev]);
-      setActiveConversationId(conversation.id);
-      setActiveMessages([]);
-      setMobileSidebarOpen(false);
-      setHistoryError(null);
-    } catch (e) {
-      setHistoryError(
-        e instanceof Error ? e.message : "Không tạo được cuộc trò chuyện",
-      );
-    }
-  }, []);
-
-  const selectConversation = useCallback(async (id: string) => {
-    setActiveConversationId(id);
+  /** A blank chat; the conversation is created on the first question or PDF. */
+  const createNewChat = useCallback(() => {
+    navCountRef.current += 1;
+    setActive(null);
+    setActiveMessages([]);
+    setDocuments([]);
+    setChatError(null);
+    setDocumentsError(null);
     setMobileSidebarOpen(false);
-    setHistoryError(null);
-    try {
-      const messages = await fetchMessages(id);
-      setActiveMessages(messages);
-    } catch (e) {
+  }, [setActive]);
+
+  // Several PDFs dropped on a blank chat must land in one new conversation, not one each.
+  const creatingRef = useRef<Promise<string> | null>(null);
+  const ensureConversation = useCallback(
+    (title: string): Promise<string> => {
+      if (activeIdRef.current) return Promise.resolve(activeIdRef.current);
+      if (!creatingRef.current) {
+        const navAtStart = navCountRef.current;
+        creatingRef.current = createConversationApi(shortTitle(title))
+          .then((conversation) => {
+            setConversations((prev) => [conversation, ...prev]);
+            // Only open it if the user has not moved to another chat meanwhile.
+            if (navCountRef.current === navAtStart) setActive(conversation.id);
+            return conversation.id;
+          })
+          .finally(() => {
+            creatingRef.current = null;
+          });
+      }
+      return creatingRef.current;
+    },
+    [setActive],
+  );
+
+  const selectConversation = useCallback(
+    async (id: string) => {
+      if (id === activeIdRef.current) {
+        setMobileSidebarOpen(false);
+        return;
+      }
+      navCountRef.current += 1;
+      setActive(id);
       setActiveMessages([]);
-      setHistoryError(
-        e instanceof Error ? e.message : "Không tải được tin nhắn",
-      );
-    }
-  }, []);
+      setDocuments([]);
+      setChatError(null);
+      setMobileSidebarOpen(false);
+      setIsLoadingMessages(true);
+
+      loadDocuments(id);
+      try {
+        const messages = await fetchMessages(id);
+        if (activeIdRef.current === id) setActiveMessages(messages);
+      } catch (e) {
+        if (activeIdRef.current === id) {
+          setChatError({ message: errorMessage(e, "Không tải được tin nhắn") });
+        }
+      } finally {
+        if (activeIdRef.current === id) setIsLoadingMessages(false);
+      }
+    },
+    [loadDocuments, setActive],
+  );
 
   const renameConversation = useCallback(async (id: string, title: string) => {
     const trimmed = title.trim();
     if (!trimmed) return;
     try {
       const updated = await updateConversationApi(id, trimmed);
-      setConversations((prev) =>
-        prev.map((c) => (c.id === id ? updated : c)),
-      );
+      setConversations((prev) => prev.map((c) => (c.id === id ? updated : c)));
       setHistoryError(null);
     } catch (e) {
-      setHistoryError(
-        e instanceof Error ? e.message : "Không đổi tên được",
-      );
+      setHistoryError(errorMessage(e, "Không đổi tên được"));
     }
   }, []);
 
@@ -168,152 +260,175 @@ export function ChatAppProvider({ children }: { children: ReactNode }) {
     async (id: string) => {
       try {
         await deleteConversationApi(id);
-        setConversations((prev) => {
-          const next = prev.filter((c) => c.id !== id);
-          setActiveConversationId((current) => {
-            if (current !== id) return current;
-            setActiveMessages([]);
-            return null;
-          });
-          return next;
-        });
+        setConversations((prev) => prev.filter((c) => c.id !== id));
+        if (activeIdRef.current === id) {
+          setActive(null);
+          setActiveMessages([]);
+          setDocuments([]);
+          setChatError(null);
+        }
         setHistoryError(null);
       } catch (e) {
-        setHistoryError(
-          e instanceof Error ? e.message : "Không xóa được cuộc trò chuyện",
-        );
+        setHistoryError(errorMessage(e, "Không xóa được cuộc trò chuyện"));
       }
     },
-    [],
+    [setActive],
   );
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string): Promise<boolean> => {
       const trimmed = content.trim();
-      if (!trimmed || isAssistantTyping) return;
+      if (!trimmed || sending) return false;
 
-      setHistoryError(null);
-      setIsAssistantTyping(true);
+      setChatError(null);
+      setSending({ conversationId: activeIdRef.current, content: trimmed });
 
+      let conversationId: string | null = null;
       try {
-        let conversationId = activeConversationId;
-
-        if (!conversationId) {
-          const conversation = await createConversationApi(
-            trimmed.slice(0, 48) + (trimmed.length > 48 ? "…" : ""),
-          );
-          setConversations((prev) => [conversation, ...prev]);
-          conversationId = conversation.id;
-          setActiveConversationId(conversation.id);
-        }
-
+        conversationId = await ensureConversation(trimmed);
+        const target = conversationId;
+        setSending((prev) => prev && { ...prev, conversationId: target });
         const { userMessage, assistantMessage, conversation } =
           await sendMessageApi(conversationId, trimmed);
 
-        setActiveMessages((prev) => [...prev, userMessage, assistantMessage]);
-        setConversations((prev) =>
-          prev.map((c) => (c.id === conversation.id ? conversation : c)),
-        );
+        setConversations((prev) => [
+          conversation,
+          ...prev.filter((c) => c.id !== conversation.id),
+        ]);
+        if (activeIdRef.current === conversationId) {
+          setActiveMessages((prev) => [...prev, userMessage, assistantMessage]);
+        }
+        return true;
       } catch (e) {
-        setHistoryError(
-          e instanceof Error ? e.message : "Không gửi được tin nhắn",
-        );
+        if (activeIdRef.current === conversationId) {
+          setChatError({
+            message: errorMessage(e, "Không gửi được tin nhắn"),
+          });
+        }
+        return false;
       } finally {
-        setIsAssistantTyping(false);
+        setSending(null);
       }
     },
-    [activeConversationId, isAssistantTyping],
+    [ensureConversation, sending],
   );
+
+  const dismissChatError = useCallback(() => setChatError(null), []);
 
   const uploadPdf = useCallback(
     async (file: File) => {
-      if (file.type !== "application/pdf") return;
+      const docId = generateId("doc");
+      const base: Document = {
+        id: docId,
+        userId: user?.id ?? "",
+        fileName: file.name,
+        fileUrl: "",
+        uploadedAt: new Date().toISOString(),
+        status: "processing",
+      };
 
-      let conversationId = activeConversationId;
-      if (!conversationId) {
-        const conversation = await createConversationApi(
-          file.name.slice(0, 48) + (file.name.length > 48 ? "…" : ""),
-        );
-        setConversations((prev) => [conversation, ...prev]);
-        conversationId = conversation.id;
-        setActiveConversationId(conversation.id);
+      const reject = (error: string) =>
+        setDocuments((prev) => [
+          { ...base, status: "error", error },
+          ...prev,
+        ]);
+
+      if (!isPdf(file)) {
+        reject("Chỉ nhận file PDF");
+        return;
+      }
+      if (file.size > MAX_PDF_MB * 1024 * 1024) {
+        reject(`File lớn hơn ${MAX_PDF_MB} MB`);
+        return;
       }
 
-      const docId = generateId("doc");
-      const uploading: Document = {
-        id: docId,
-        userId: user.id,
-        fileName: file.name,
-        fileUrl: URL.createObjectURL(file),
-        uploadedAt: new Date().toISOString(),
-        status: "uploading",
-      };
-      setDocuments((prev) => [uploading, ...prev]);
-
+      setDocuments((prev) => [base, ...prev]);
       try {
-        setDocuments((prev) =>
-          prev.map((d) =>
-            d.id === docId ? { ...d, status: "processing" as DocumentStatus } : d,
-          ),
-        );
-
-        await uploadPdfApi(conversationId, user.id, file);
-
-        setDocuments((prev) =>
-          prev.map((d) =>
-            d.id === docId ? { ...d, status: "ready" as DocumentStatus } : d,
-          ),
-        );
+        const conversationId = await ensureConversation(file.name);
+        await uploadPdfApi(conversationId, file);
+        if (activeIdRef.current !== conversationId) return;
+        setDocuments((prev) => prev.filter((d) => d.id !== docId));
+        await loadDocuments(conversationId);
       } catch (e) {
         setDocuments((prev) =>
           prev.map((d) =>
-            d.id === docId ? { ...d, status: "error" as DocumentStatus } : d,
+            d.id === docId
+              ? {
+                  ...d,
+                  status: "error",
+                  error: errorMessage(e, "Upload PDF thất bại"),
+                }
+              : d,
           ),
-        );
-        setHistoryError(
-          e instanceof Error
-            ? `Upload PDF thất bại: ${e.message}`
-            : "Upload PDF thất bại",
         );
       }
     },
-    [activeConversationId, createConversationApi, setConversations, setActiveConversationId, user.id],
+    [ensureConversation, loadDocuments, user?.id],
   );
 
-  const removeDocument = useCallback((id: string) => {
-    setDocuments((prev) => {
-      const doc = prev.find((d) => d.id === id);
-      if (doc?.fileUrl.startsWith("blob:")) {
-        URL.revokeObjectURL(doc.fileUrl);
-      }
-      return prev.filter((d) => d.id !== id);
-    });
+  /** A citation was clicked: reveal its PDF in the documents panel. */
+  const showSource = useCallback((fileId: string) => {
+    setDocsOpen(true);
+    setHighlightedDocId(fileId);
+    window.clearTimeout(highlightTimer.current);
+    highlightTimer.current = window.setTimeout(
+      () => setHighlightedDocId(null),
+      1600,
+    );
+  }, []);
+
+  const dismissDocument = useCallback((id: string) => {
+    setDocuments((prev) => prev.filter((d) => d.id !== id));
+  }, []);
+
+  const removeDocument = useCallback(async (id: string) => {
+    const conversationId = activeIdRef.current;
+    if (!conversationId) return;
+    setDocumentsError(null);
+    try {
+      await deleteDocumentApi(conversationId, id);
+      setDocuments((prev) => prev.filter((d) => d.id !== id));
+    } catch (e) {
+      setDocumentsError(errorMessage(e, "Không xóa được PDF"));
+    }
   }, []);
 
   const value: ChatAppContextValue = {
     user,
     sidebarCollapsed,
     mobileSidebarOpen,
-    selectedModel,
+    docsOpen,
     activeConversationId,
     conversations,
     documents,
     historyGroups,
     activeMessages,
     activeConversation,
-    isAssistantTyping,
+    isSending: sending !== null,
+    pendingQuestion:
+      sending && sending.conversationId === activeConversationId
+        ? sending.content
+        : null,
     isLoadingHistory,
+    isLoadingMessages,
+    isLoadingDocuments,
     historyError,
+    chatError,
+    documentsError,
+    highlightedDocId,
+    showSource,
     toggleSidebar,
     setMobileSidebarOpen,
-    setSelectedModel,
+    setDocsOpen,
     createNewChat,
     selectConversation,
     renameConversation,
     deleteConversation,
     sendMessage,
+    dismissChatError,
     uploadPdf,
     removeDocument,
+    dismissDocument,
   };
 
   return (

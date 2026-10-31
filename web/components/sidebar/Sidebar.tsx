@@ -1,9 +1,8 @@
 "use client";
 
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { Mark } from "@/components/brand/Mark";
 import { NewChatButton } from "@/components/sidebar/NewChatButton";
-import { PDFUpload } from "@/components/sidebar/PDFUpload";
-import { PDFList } from "@/components/sidebar/PDFList";
 import { ChatHistory } from "@/components/sidebar/ChatHistory";
 import { UserProfile } from "@/components/sidebar/UserProfile";
 import { useChatApp } from "@/context/ChatAppContext";
@@ -13,60 +12,70 @@ interface SidebarProps {
   className?: string;
 }
 
+const iconButton =
+  "inline-flex h-9 w-9 items-center justify-center rounded-control text-muted transition-colors hover:bg-active hover:text-ink";
+
 export function Sidebar({ className }: SidebarProps) {
-  const { sidebarCollapsed, toggleSidebar } = useChatApp();
+  const { sidebarCollapsed, toggleSidebar, setMobileSidebarOpen } =
+    useChatApp();
 
   return (
     <aside
-      className={cn(
-        "flex h-full flex-col border-r border-surface-border bg-surface-sidebar shadow-drawer md:shadow-none",
-        className,
-      )}
+      aria-label="Cuộc trò chuyện"
+      className={cn("flex h-full flex-col bg-ground", className)}
     >
       <div
         className={cn(
-          "flex items-center gap-2 border-b border-surface-border/60 p-2",
-          sidebarCollapsed ? "justify-center" : "justify-between px-3",
+          "flex h-14 shrink-0 items-center gap-2 px-3",
+          sidebarCollapsed && "md:justify-center md:px-0",
         )}
       >
-        {!sidebarCollapsed && (
-          <span className="truncate text-sm font-semibold tracking-tight text-zinc-200">
-            TrainAI
-          </span>
-        )}
+        <div
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-2.5 pl-1",
+            sidebarCollapsed && "md:hidden",
+          )}
+        >
+          <Mark />
+          <span className="text-[15px] font-semibold">TrainAI</span>
+        </div>
         <button
           type="button"
           onClick={toggleSidebar}
-          className="hidden rounded-lg p-2 text-zinc-400 transition-colors hover:bg-surface-hover hover:text-zinc-100 md:inline-flex"
-          aria-label={sidebarCollapsed ? "Mở sidebar" : "Thu gọn sidebar"}
+          className={cn(iconButton, "hidden md:inline-flex")}
+          aria-label={sidebarCollapsed ? "Mở rộng thanh bên" : "Thu gọn thanh bên"}
+          title={sidebarCollapsed ? "Mở rộng thanh bên" : "Thu gọn thanh bên"}
         >
           {sidebarCollapsed ? (
-            <PanelLeftOpen className="h-5 w-5" />
+            <PanelLeftOpen className="h-[18px] w-[18px]" />
           ) : (
-            <PanelLeftClose className="h-5 w-5" />
+            <PanelLeftClose className="h-[18px] w-[18px]" />
           )}
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileSidebarOpen(false)}
+          className={cn(iconButton, "md:hidden")}
+          aria-label="Đóng thanh bên"
+        >
+          <X className="h-[18px] w-[18px]" />
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className={cn("shrink-0 space-y-1 p-2", sidebarCollapsed && "px-1.5")}>
-          <NewChatButton collapsed={sidebarCollapsed} />
-          {!sidebarCollapsed && (
-            <>
-              <PDFUpload />
-              <PDFList />
-            </>
-          )}
-        </div>
-
-        {!sidebarCollapsed && (
-          <div className="min-h-0 flex-1 overflow-hidden border-t border-surface-border/60">
-            <ChatHistory />
-          </div>
-        )}
-
-        <UserProfile collapsed={sidebarCollapsed} />
+      <div className={cn("px-3 pb-3", sidebarCollapsed && "md:px-2")}>
+        <NewChatButton collapsed={sidebarCollapsed} />
       </div>
+
+      <div
+        className={cn(
+          "min-h-0 flex-1",
+          sidebarCollapsed && "md:invisible",
+        )}
+      >
+        <ChatHistory />
+      </div>
+
+      <UserProfile collapsed={sidebarCollapsed} />
     </aside>
   );
 }

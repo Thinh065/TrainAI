@@ -1,4 +1,4 @@
-import type { Conversation, Message, User } from "@/lib/types";
+import type { Conversation, Document, Message, User } from "@/lib/types";
 
 async function parseJson<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => ({}));
@@ -79,12 +79,15 @@ export async function sendMessageApi(
 
 export async function uploadPdfApi(
   conversationId: string,
-  userId: string,
   file: File,
-): Promise<{ file_id: string; file_name: string; chunks_indexed: number }> {
+): Promise<{
+  file_id: string;
+  file_name: string;
+  chunks_indexed: number;
+  already_indexed: boolean;
+}> {
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("user_id", userId);
 
   const res = await fetch(
     `/api/upload-pdf?conversationId=${encodeURIComponent(conversationId)}`,
@@ -94,4 +97,25 @@ export async function uploadPdfApi(
     },
   );
   return parseJson(res);
+}
+
+export async function fetchDocumentsApi(
+  conversationId: string,
+): Promise<Document[]> {
+  const res = await fetch(
+    `/api/documents?conversationId=${encodeURIComponent(conversationId)}`,
+  );
+  const data = await parseJson<{ documents?: Document[] }>(res);
+  return data.documents ?? [];
+}
+
+export async function deleteDocumentApi(
+  conversationId: string,
+  documentId: string,
+): Promise<void> {
+  const res = await fetch(
+    `/api/documents/${encodeURIComponent(documentId)}?conversationId=${encodeURIComponent(conversationId)}`,
+    { method: "DELETE" },
+  );
+  await parseJson<{ deleted?: boolean }>(res);
 }

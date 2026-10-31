@@ -1,5 +1,6 @@
 import type { Config } from "tailwindcss";
 
+// Colours are CSS variables (app/globals.css) so light and dark share one set of names.
 const config: Config = {
   content: [
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
@@ -8,26 +9,45 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        surface: {
-          DEFAULT: "#212121",
-          elevated: "#2f2f2f",
-          sidebar: "#171717",
-          chat: "#212121",
-          input: "#303030",
-          hover: "#2a2a2a",
-          border: "#3f3f3f",
+        ground: "var(--ground)",
+        surface: "var(--surface)",
+        raised: "var(--raised)",
+        active: "var(--active)",
+        line: "var(--border)",
+        rule: "var(--rule)",
+        control: "var(--control)",
+        ink: "var(--text)",
+        muted: "var(--muted)",
+        faint: "var(--faint)",
+        primary: {
+          DEFAULT: "var(--primary)",
+          ink: "var(--primary-ink)",
+          hover: "var(--primary-hover)",
         },
-        accent: {
-          DEFAULT: "#10a37f",
-          hover: "#0d8f6f",
-          muted: "#1a3d34",
+        cite: {
+          DEFAULT: "var(--cite)",
+          soft: "var(--cite-soft)",
         },
+        danger: {
+          DEFAULT: "var(--negative)",
+          soft: "var(--negative-soft)",
+          ink: "var(--negative-ink)",
+        },
+      },
+      fontFamily: {
+        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)", "ui-monospace", "monospace"],
+      },
+      borderRadius: {
+        card: "8px",
+        control: "6px",
       },
       transitionDuration: {
-        DEFAULT: "200ms",
+        DEFAULT: "150ms",
       },
       boxShadow: {
-        drawer: "4px 0 24px rgba(0,0,0,0.4)",
+        float: "0 8px 24px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.08)",
+        composer: "0 2px 8px rgba(0,0,0,0.05)",
       },
     },
   },

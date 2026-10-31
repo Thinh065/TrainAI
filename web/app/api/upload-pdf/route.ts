@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
+import { proxyToPython } from "@/lib/server/python-api";
 
 export async function POST(request: Request) {
-  const url = new URL(request.url);
-  const conversationId = url.searchParams.get("conversationId");
+  const conversationId = new URL(request.url).searchParams.get("conversationId");
   if (!conversationId) {
     return NextResponse.json(
       { error: "conversationId query parameter is required" },
@@ -10,42 +10,20 @@ export async function POST(request: Request) {
     );
   }
 
-  const pythonBase = process.env.PYTHON_API_URL?.replace(/\/$/, "");
-  if (!pythonBase) {
-    return NextResponse.json(
-      { error: "PYTHON_API_URL is not configured" },
-      { status: 500 },
-    );
+  const file = (await request.formData().catch(() => null))?.get("file");
+  if (!(file instanceof File)) {
+    return NextResponse.json({ error: "Chưa chọn file" }, { status: 400 });
   }
 
-  const formData = await request.formData();
-  const userId = formData.get("user_id")?.toString() || "";
-  if (!userId) {
-    return NextResponse.json(
-      { error: "user_id is required" },
-      { status: 400 },
-    );
-  }
-
-  if (!formData.has("file")) {
-    return NextResponse.json(
-      { error: "No file uploaded" },
-      { status: 400 },
-    );
-  }
-
-  const proxyUrl = `${pythonBase}/api/conversations/${encodeURIComponent(
-    conversationId,
-  )}/files`;
-  const proxyResponse = await fetch(proxyUrl, {
-    method: "POST",
-    body: formData,
-  });
-
-  const responseBody = await proxyResponse.text();
-  const contentType = proxyResponse.headers.get("content-type") || "";
-  const isJson = contentType.includes("application/json");
-  const body = isJson ? JSON.parse(responseBody) : { message: responseBody };
-
-  return NextResponse.json(body, { status: proxyResponse.status });
+  return proxyToPython(
+    () => `/api/conversations/${encodeURIComponent(conversationId)}/files`,
+    "Không xử lý được PDF",
+    // The owner comes from the server session, never from the browser.
+    (userId) => {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      form.append("user_id", userId);
+      return { method: "POST", body: form };
+    },
+  );
 }

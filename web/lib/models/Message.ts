@@ -14,6 +14,17 @@ const messageSchema = new Schema(
       required: true,
     },
     content: { type: String, required: true },
+    sources: {
+      type: [
+        {
+          _id: false,
+          fileId: String,
+          fileName: String,
+          pageNumber: Number,
+        },
+      ],
+      default: undefined,
+    },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );

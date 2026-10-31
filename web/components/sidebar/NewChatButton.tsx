@@ -1,6 +1,6 @@
 "use client";
 
-import { SquarePen } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useChatApp } from "@/context/ChatAppContext";
 import { cn } from "@/lib/utils";
 
@@ -15,14 +15,15 @@ export function NewChatButton({ collapsed }: NewChatButtonProps) {
     <button
       type="button"
       onClick={createNewChat}
-      title="New Chat"
+      title="Cuộc trò chuyện mới"
+      aria-label="Cuộc trò chuyện mới"
       className={cn(
-        "flex w-full items-center gap-3 rounded-lg border border-surface-border/80 bg-surface-elevated/40 px-3 py-2.5 text-sm font-medium text-zinc-100 transition-all hover:border-accent/40 hover:bg-surface-hover hover:shadow-sm active:scale-[0.98]",
-        collapsed && "justify-center px-2",
+        "flex h-9 w-full items-center gap-2 rounded-control bg-primary px-3 text-sm font-medium text-primary-ink transition-colors hover:bg-primary-hover active:translate-y-px",
+        collapsed && "md:w-10 md:justify-center md:px-0",
       )}
     >
-      <SquarePen className="h-4 w-4 shrink-0 text-accent" />
-      {!collapsed && <span>New Chat</span>}
+      <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <span className={cn(collapsed && "md:hidden")}>Cuộc trò chuyện mới</span>
     </button>
   );
 }

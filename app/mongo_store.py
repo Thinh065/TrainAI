@@ -195,6 +195,17 @@ def get_file_by_id(user_id: str, conversation_id: str, file_id: str) -> Optional
     return _serialize_doc(doc)
 
 
+def delete_file_record(user_id: str, conversation_id: str, file_id: str) -> bool:
+    result = get_db().files.delete_one(
+        {
+            "file_id": str(file_id),
+            "conversation_id": str(conversation_id),
+            "user_id": str(user_id).strip(),
+        }
+    )
+    return result.deleted_count > 0
+
+
 def ping() -> bool:
     try:
         get_client().admin.command("ping")

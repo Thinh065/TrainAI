@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/mongodb";
 import { ConversationModel } from "@/lib/models/Conversation";
 import { MessageModel } from "@/lib/models/Message";
 import { getDefaultUser } from "@/lib/server/default-user";
+import { fetchPython, readPythonJson } from "@/lib/server/python-api";
 import { serializeConversation } from "@/lib/server/serialize";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -32,7 +33,9 @@ export async function PATCH(request: Request, context: RouteContext) {
       );
     }
 
-    const body = (await request.json()) as { title?: string };
+    const body = (await request.json().catch(() => ({}))) as {
+      title?: string;
+    };
     const title = body.title?.trim();
     if (!title) {
       return NextResponse.json(
@@ -41,7 +44,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       );
     }
 
-    conv.title = title;
+    conv.title = title.slice(0, 120);
     await conv.save();
 
     return NextResponse.json({ conversation: serializeConversation(conv) });
@@ -68,8 +71,21 @@ export async function DELETE(_request: Request, context: RouteContext) {
       );
     }
 
+    // Remove the conversation's PDFs and chunks too; a stopped Python API must not block deleting.
+    try {
+      const res = await fetchPython(
+        `/api/conversations/${encodeURIComponent(id)}?user_id=${encodeURIComponent(user._id.toString())}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) {
+        console.error("Python cleanup failed:", await readPythonJson(res));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
     await MessageModel.deleteMany({ conversationId: conv._id });
-    await conv.deleteOne();
+    await ConversationModel.deleteOne({ _id: conv._id });
 
     return NextResponse.json({ ok: true });
   } catch (e) {

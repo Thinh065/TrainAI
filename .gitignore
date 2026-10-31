@@ -18,3 +18,8 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+# Local data written by the app
+chroma_db/
+data/uploads/
+web/*.tsbuildinfo
+.taste-skill/

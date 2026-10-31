@@ -55,11 +55,12 @@ def add_documents(documents: List[str], embeddings: List[List[float]], metadata:
     if not documents:
         return
     collection = get_collection()
+    # The same PDF can be uploaded to several conversations, so the id must include the conversation.
     ids = [
-        f"{meta.get('file_id', 'file')}-{meta.get('page_number', 0)}-{meta.get('chunk_index', idx)}"
+        f"{meta.get('conversation_id', 'conv')}-{meta.get('file_id', 'file')}-{meta.get('page_number', 0)}-{meta.get('chunk_index', idx)}"
         for idx, meta in enumerate(metadata)
     ]
-    collection.add(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadata)
+    collection.upsert(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadata)
 
 
 def search_similar_documents(query_embedding: List[float], user_id: str, conversation_id: str | None = None, top_k: int = 5) -> List[Dict[str, Any]]:
@@ -69,45 +70,64 @@ def search_similar_documents(query_embedding: List[float], user_id: str, convers
     else:
         where = {"user_id": user_id}
 
+    # No fallback to the user's other conversations: their PDFs must not leak into this one.
     results = collection.query(
         query_embeddings=[query_embedding],
         n_results=top_k,
         where=where,
     )
 
-    documents = results.get("documents", [[]])[0]
-    metadatas = results.get("metadatas", [[]])[0]
-    distances = results.get("distances", [[]])[0]
+    documents = (results.get("documents") or [[]])[0]
+    metadatas = (results.get("metadatas") or [[]])[0]
+    distances = (results.get("distances") or [[]])[0]
+    return [
+        {
+            "document": doc,
+            "metadata": meta,
+            "distance": dist,
+        }
+        for doc, meta, dist in zip(documents, metadatas, distances)
+    ]
 
-    if documents:
-        return [
-            {
-                "document": doc,
-                "metadata": meta,
-                "distance": dist,
-            }
-            for doc, meta, dist in zip(documents, metadatas, distances)
-        ]
 
-    if conversation_id is not None:
-        fallback_results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k,
-            where={"user_id": user_id},
-        )
-        documents = fallback_results.get("documents", [[]])[0]
-        metadatas = fallback_results.get("metadatas", [[]])[0]
-        distances = fallback_results.get("distances", [[]])[0]
-        return [
-            {
-                "document": doc,
-                "metadata": meta,
-                "distance": dist,
-            }
-            for doc, meta, dist in zip(documents, metadatas, distances)
-        ]
+def _delete_where(where: Dict[str, Any]) -> int:
+    collection = get_collection()
+    # "ids" is always returned and is not a valid include value.
+    records = collection.get(where=where, include=[])
+    ids = records.get("ids", [])
+    if ids:
+        collection.delete(ids=ids)
+    return len(ids)
 
-    return []
+
+def delete_documents_by_file_id(user_id: str, conversation_id: str, file_id: str) -> int:
+    return _delete_where(
+        {
+            "$and": [
+                {"user_id": str(user_id)},
+                {"conversation_id": str(conversation_id)},
+                {"file_id": str(file_id)},
+            ]
+        }
+    )
+
+
+def count_documents_for_file(user_id: str, conversation_id: str, file_id: str) -> int:
+    records = get_collection().get(
+        where={
+            "$and": [
+                {"user_id": str(user_id)},
+                {"conversation_id": str(conversation_id)},
+                {"file_id": str(file_id)},
+            ]
+        },
+        include=[],
+    )
+    return len(records.get("ids", []))
+
+
+def delete_documents_by_conversation(user_id: str, conversation_id: str) -> int:
+    return _delete_where({"$and": [{"user_id": str(user_id)}, {"conversation_id": str(conversation_id)}]})
 
 
 def delete_collection() -> None:

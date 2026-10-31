@@ -3,8 +3,12 @@ import mongoose from "mongoose";
 import { connectDB } from "@/lib/mongodb";
 import { ConversationModel } from "@/lib/models/Conversation";
 import { MessageModel } from "@/lib/models/Message";
-import { getAssistantReply } from "@/lib/server/assistant";
+import {
+  getAssistantReply,
+  type AssistantReply,
+} from "@/lib/server/assistant";
 import { getDefaultUser } from "@/lib/server/default-user";
+import { errorMessage, shortTitle } from "@/lib/utils";
 import {
   serializeConversation,
   serializeMessage,
@@ -55,7 +59,9 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({ error: "ID không hợp lệ" }, { status: 400 });
     }
 
-    const body = (await request.json()) as { content?: string };
+    const body = (await request.json().catch(() => ({}))) as {
+      content?: string;
+    };
     const content = body.content?.trim();
     if (!content) {
       return NextResponse.json(
@@ -77,12 +83,36 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
+    // Ask first, save after: a failed answer must not leave an orphan question.
+    let reply: AssistantReply;
+    try {
+      reply = await getAssistantReply(content, user._id.toString(), id);
+    } catch (e) {
+      console.error("Python API chat failed:", e);
+      return NextResponse.json(
+        {
+          error: errorMessage(e, "Trợ lý không trả lời được"),
+        },
+        { status: 502 },
+      );
+    }
+
     if (conv.title === "Cuộc trò chuyện mới") {
-      conv.title =
-        content.slice(0, 48) + (content.length > 48 ? "…" : "");
+      conv.title = shortTitle(content);
     }
     conv.updatedAt = new Date();
-    await conv.save();
+    // The conversation may have been deleted while the answer was being written.
+    const { matchedCount } = await ConversationModel.updateOne(
+      { _id: conv._id, userId: user._id },
+      { $set: { title: conv.title, updatedAt: conv.updatedAt } },
+      { timestamps: false },
+    );
+    if (matchedCount === 0) {
+      return NextResponse.json(
+        { error: "Cuộc trò chuyện đã bị xóa trong lúc trả lời" },
+        { status: 410 },
+      );
+    }
 
     const userMessage = await MessageModel.create({
       conversationId: conv._id,
@@ -90,16 +120,11 @@ export async function POST(request: Request, context: RouteContext) {
       content,
     });
 
-    const answer = await getAssistantReply(
-      content,
-      user._id.toString(),
-      id,
-    );
-
     const assistantMessage = await MessageModel.create({
       conversationId: conv._id,
       role: "assistant",
-      content: answer,
+      content: reply.answer,
+      sources: reply.sources.length ? reply.sources : undefined,
     });
 
     return NextResponse.json({

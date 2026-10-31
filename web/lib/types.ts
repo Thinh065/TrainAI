@@ -17,12 +17,20 @@ export interface Conversation {
   updatedAt: string;
 }
 
+/** A PDF page the answer was built from. */
+export interface Source {
+  fileId: string;
+  fileName: string;
+  pageNumber: number;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
   role: MessageRole;
   content: string;
   createdAt: string;
+  sources?: Source[];
 }
 
 export interface Document {
@@ -32,6 +40,7 @@ export interface Document {
   fileUrl: string;
   uploadedAt: string;
   status: DocumentStatus;
+  error?: string;
 }
 
 export type HistoryGroupKey =

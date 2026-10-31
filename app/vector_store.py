@@ -1,4 +1,4 @@
-from chroma_store import add_documents as add_chroma_documents, search_similar_documents as search_chroma_documents
+from app.chroma_store import add_documents as add_chroma_documents, search_similar_documents as search_chroma_documents
 
 
 def add_documents(documents, embeddings, metadata=None):

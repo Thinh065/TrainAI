@@ -2,29 +2,223 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Achromatic ledger: the chrome is ink on a blue-grey paper ground.
+ * The one hue (--cite) marks where an answer came from, and nothing else.
+ */
+:root {
+  color-scheme: light;
+  --ground: #f2f4f7;
+  --surface: #ffffff;
+  --raised: #eceff3;
+  --active: #e3e7ec;
+  --border: #e1e4e8;
+  --rule: #eceef1;
+  --control: #cdd2d8;
+  --text: #0b0d10;
+  --muted: #555b63;
+  --faint: #6a7078;
+  --primary: #15171a;
+  --primary-ink: #ffffff;
+  --primary-hover: #33373d;
+  --cite: #1d5fbf;
+  --cite-soft: #e8eef9;
+  --negative: #c4242a;
+  --negative-soft: #ffedea;
+  --negative-ink: #831c1e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --ground: #111111;
+    --surface: #181818;
+    --raised: #222222;
+    --active: #2a2a2a;
+    --border: #262626;
+    --rule: #222222;
+    --control: #444444;
+    --text: #f3f3f3;
+    --muted: #b4b4b4;
+    --faint: #949494;
+    --primary: #f3f3f3;
+    --primary-ink: #111111;
+    --primary-hover: #d6d6d6;
+    --cite: #8db2ef;
+    --cite-soft: #1b2535;
+    --negative: #e5566f;
+    --negative-soft: #2c1a20;
+    --negative-ink: #f08a9c;
+  }
+}
+
 @layer base {
   html {
     @apply antialiased;
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
-    @apply bg-surface-chat text-zinc-100;
+    @apply bg-ground text-ink;
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--cite);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--cite-soft);
   }
 
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-transparent;
+    background: transparent;
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply rounded-full bg-zinc-700/80;
+    background: var(--control);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
 
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-zinc-600;
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Markdown answers from the model. */
+  .answer {
+    font-size: 15px;
+    line-height: 1.65;
+    color: var(--text);
+    overflow-wrap: anywhere;
+  }
+
+  .answer > * + * {
+    margin-top: 0.85em;
+  }
+
+  .answer h1,
+  .answer h2,
+  .answer h3,
+  .answer h4 {
+    font-weight: 600;
+    line-height: 1.35;
+    margin-top: 1.4em;
+  }
+
+  .answer h1 {
+    font-size: 18px;
+  }
+
+  .answer h2 {
+    font-size: 17px;
+  }
+
+  .answer h3,
+  .answer h4 {
+    font-size: 15px;
+  }
+
+  .answer > :first-child {
+    margin-top: 0;
+  }
+
+  .answer strong {
+    font-weight: 600;
+  }
+
+  .answer a {
+    color: var(--cite);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .answer ul,
+  .answer ol {
+    padding-left: 1.4em;
+  }
+
+  .answer ul {
+    list-style: disc;
+  }
+
+  .answer ol {
+    list-style: decimal;
+  }
+
+  .answer li + li {
+    margin-top: 0.3em;
+  }
+
+  .answer li::marker {
+    color: var(--faint);
+  }
+
+  .answer blockquote {
+    padding-left: 14px;
+    box-shadow: inset 3px 0 0 var(--active);
+    color: var(--muted);
+  }
+
+  .answer hr {
+    border: 0;
+    height: 1px;
+    background: var(--rule);
+  }
+
+  .answer :not(pre) > code {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 0.86em;
+    background: var(--raised);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+  }
+
+  .answer .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .answer table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    line-height: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .answer th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .answer th,
+  .answer td {
+    padding: 9px 12px;
+    vertical-align: top;
+  }
+
+  .answer tbody tr {
+    border-top: 1px solid var(--rule);
   }
 }

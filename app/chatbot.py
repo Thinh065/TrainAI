@@ -24,9 +24,14 @@ else:
     logger.warning("No AI API key configured; Gemini requests will fail.")
 
 
+class ChatbotError(RuntimeError):
+    """Raised when the model cannot produce an answer."""
+
+
 def ask_chatbot(prompt_or_question, relevant_chunks=None):
     """
     Gửi câu hỏi hoặc prompt đã được xây dựng sẵn tới Gemini.
+    Ném ChatbotError khi model lỗi, để lỗi không bị lưu như một câu trả lời.
     """
     if relevant_chunks is not None:
         context = "\n\n".join(relevant_chunks if isinstance(relevant_chunks, list) else [str(relevant_chunks)])
@@ -45,13 +50,16 @@ Câu trả lời:
     else:
         prompt_content = prompt_or_question
 
-    try:
-        if client is None:
-            raise RuntimeError("AI API key is not configured")
+    if client is None:
+        raise ChatbotError("Chưa cấu hình AI_API_KEY cho Gemini")
 
-        chat = client.chats.create(model=MODEL_NAME)
-        response = chat.send_message(prompt_content)
-        return getattr(response, "text", "").strip()
-    except Exception as exc:  # pragma: no cover - runtime fallback
+    try:
+        response = client.models.generate_content(model=MODEL_NAME, contents=prompt_content)
+    except Exception as exc:
         logger.exception("AI generation failed")
-        return f"Hiện tại tôi không thể trả lời câu hỏi này: {exc}"
+        raise ChatbotError(f"Gemini không trả lời được: {exc}") from exc
+
+    answer = (getattr(response, "text", None) or "").strip()
+    if not answer:
+        raise ChatbotError("Gemini trả về câu trả lời trống")
+    return answer

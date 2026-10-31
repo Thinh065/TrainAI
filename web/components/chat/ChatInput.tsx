@@ -1,87 +1,103 @@
 "use client";
 
-import { useRef, useCallback, KeyboardEvent } from "react";
-import { ArrowUp, Paperclip } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { ArrowUp, Loader2, Paperclip } from "lucide-react";
 import { useChatApp } from "@/context/ChatAppContext";
+import { usePdfPicker } from "@/components/documents/usePdfPicker";
 import { cn } from "@/lib/utils";
 
 export function ChatInput() {
-  const { sendMessage, isAssistantTyping } = useChatApp();
+  const { sendMessage, isSending, activeConversationId } = useChatApp();
+  const { openPicker, input } = usePdfPicker();
+  const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
-  const adjustHeight = useCallback(() => {
+  const resize = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
+    // Empty: let CSS decide (one row). Measuring the placeholder at mount gave 200px.
+    el.style.height = "";
+    if (!el.value) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, []);
 
-  const submit = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el || isAssistantTyping) return;
-    const value = el.value;
-    if (!value.trim()) return;
-    sendMessage(value);
-    el.value = "";
-    el.style.height = "auto";
-  }, [sendMessage, isAssistantTyping]);
+  useEffect(resize, [value, resize]);
+
+  useEffect(() => {
+    // Not on touch screens: focusing would pop the keyboard over the answers.
+    if (window.matchMedia("(hover: hover)").matches) {
+      textareaRef.current?.focus();
+    }
+  }, [activeConversationId]);
+
+  const canSend = value.trim().length > 0 && !isSending;
+
+  const submit = useCallback(async () => {
+    if (!canSend) return;
+    const text = value;
+    setValue("");
+    const sent = await sendMessage(text);
+    // Keep the question when sending failed, so it can be sent again.
+    if (!sent) setValue((current) => current || text);
+  }, [canSend, sendMessage, value]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submit();
     }
   };
 
   return (
-    <div className="shrink-0 border-t border-surface-border/40 bg-gradient-to-t from-surface-chat via-surface-chat to-transparent px-3 pb-4 pt-2 md:px-6">
-      <div className="mx-auto max-w-3xl">
-        <div className="relative flex items-end gap-2 rounded-2xl border border-surface-border bg-surface-input p-2 shadow-lg shadow-black/20 transition-colors focus-within:border-zinc-500">
-          <input
-            ref={fileRef}
-            type="file"
-            className="hidden"
-            accept="application/pdf,image/*"
-            onChange={() => {
-              if (fileRef.current) fileRef.current.value = "";
-            }}
-          />
+    <div className="shrink-0 px-3 pb-3 md:px-5 md:pb-4">
+      <div className="mx-auto max-w-[760px]">
+        <div className="flex items-end gap-1 rounded-card border border-control bg-surface p-1.5 shadow-composer transition-colors focus-within:border-ink">
+          {input}
           <button
             type="button"
-            onClick={() => fileRef.current?.click()}
-            className="mb-1 rounded-lg p-2 text-zinc-500 transition-colors hover:bg-surface-hover hover:text-zinc-300"
-            aria-label="Đính kèm file"
-            title="Đính kèm (UI — chưa kết nối backend)"
+            onClick={openPicker}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-control text-muted transition-colors hover:bg-raised hover:text-ink"
+            aria-label="Thêm PDF"
+            title="Thêm PDF"
           >
-            <Paperclip className="h-5 w-5" />
+            <Paperclip className="h-[18px] w-[18px]" />
           </button>
 
+          <label htmlFor="composer" className="sr-only">
+            Câu hỏi
+          </label>
           <textarea
+            id="composer"
             ref={textareaRef}
             rows={1}
-            placeholder="Nhập tin nhắn… (Enter gửi, Shift+Enter xuống dòng)"
-            disabled={isAssistantTyping}
-            onInput={adjustHeight}
+            value={value}
+            placeholder="Hỏi về tài liệu của bạn…"
+            onChange={(e) => setValue(e.target.value)}
             onKeyDown={onKeyDown}
-            className="max-h-[200px] min-h-[44px] flex-1 resize-none bg-transparent py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none disabled:opacity-50"
+            className="max-h-[200px] min-h-10 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] leading-5 outline-none placeholder:text-faint"
           />
 
           <button
             type="button"
             onClick={submit}
-            disabled={isAssistantTyping}
+            disabled={!canSend}
             className={cn(
-              "mb-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-white transition-all hover:bg-accent-hover active:scale-95 disabled:cursor-not-allowed disabled:opacity-40",
+              "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-primary text-primary-ink transition-colors hover:bg-primary-hover active:translate-y-px",
+              "disabled:cursor-not-allowed disabled:bg-active disabled:text-faint",
             )}
-            aria-label="Gửi tin nhắn"
+            aria-label={isSending ? "Đang trả lời" : "Gửi câu hỏi"}
           >
-            <ArrowUp className="h-5 w-5" />
+            {isSending ? (
+              <Loader2 className="h-[18px] w-[18px] animate-spin" />
+            ) : (
+              <ArrowUp className="h-[18px] w-[18px]" />
+            )}
           </button>
         </div>
-        <p className="mt-2 text-center text-[11px] text-zinc-600">
-          TrainAI có thể mắc lỗi. Kiểm tra thông tin quan trọng trong tài liệu
-          chính thức.
+        <p className="mt-2 text-center text-xs text-faint">
+          Enter để gửi, Shift + Enter để xuống dòng. Câu trả lời có thể sai, hãy
+          đối chiếu trang nguồn.
         </p>
       </div>
     </div>

@@ -29,5 +29,14 @@ export function serializeMessage(doc: MessageDocument): Message {
     role: doc.role as Message["role"],
     content: doc.content,
     createdAt: doc.createdAt.toISOString(),
+    ...(doc.sources?.length
+      ? {
+          sources: doc.sources.map((s) => ({
+            fileId: s.fileId ?? "",
+            fileName: s.fileName ?? "PDF",
+            pageNumber: s.pageNumber ?? 0,
+          })),
+        }
+      : {}),
   };
 }
