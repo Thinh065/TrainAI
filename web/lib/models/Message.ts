@@ -25,16 +25,23 @@ const messageSchema = new Schema(
       ],
       default: undefined,
     },
+    report: { type: Schema.Types.Mixed, default: undefined },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
 
 messageSchema.index({ conversationId: 1, createdAt: 1 });
+messageSchema.index({ "report.jobId": 1 }, { sparse: true });
 
 export type MessageDocument = InferSchemaType<typeof messageSchema> & {
   _id: mongoose.Types.ObjectId;
   createdAt: Date;
 };
+
+// Dev hot reload keeps the old compiled model, which silently drops new fields (report).
+if (process.env.NODE_ENV !== "production" && mongoose.models.Message) {
+  mongoose.deleteModel("Message");
+}
 
 export const MessageModel: Model<MessageDocument> =
   mongoose.models.Message ??

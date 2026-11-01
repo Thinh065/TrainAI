@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import sys
@@ -26,6 +27,18 @@ else:
 
 class ChatbotError(RuntimeError):
     """Raised when the model cannot produce an answer."""
+
+
+def _generation_error(exc: Exception) -> ChatbotError:
+    """Lỗi Gemini viết lại cho người dùng đọc được."""
+    text = str(exc)
+    if "429" in text or "RESOURCE_EXHAUSTED" in text:
+        if "PerDay" in text or "per day" in text:
+            return ChatbotError(f"Gemini ({MODEL_NAME}) đã hết lượt miễn phí của hôm nay. Thử lại vào ngày mai, đổi AI_MODEL_NAME hoặc nâng gói.")
+        return ChatbotError("Gemini đang giới hạn số lượt mỗi phút. Đợi khoảng một phút rồi thử lại.")
+    if "503" in text or "UNAVAILABLE" in text:
+        return ChatbotError("Gemini đang quá tải. Thử lại sau ít phút.")
+    return ChatbotError(f"Gemini không trả lời được: {text[:300]}")
 
 
 def ask_chatbot(prompt_or_question, relevant_chunks=None):
@@ -57,9 +70,30 @@ Câu trả lời:
         response = client.models.generate_content(model=MODEL_NAME, contents=prompt_content)
     except Exception as exc:
         logger.exception("AI generation failed")
-        raise ChatbotError(f"Gemini không trả lời được: {exc}") from exc
+        raise _generation_error(exc) from exc
 
     answer = (getattr(response, "text", None) or "").strip()
     if not answer:
         raise ChatbotError("Gemini trả về câu trả lời trống")
     return answer
+
+
+def ask_chatbot_json(prompt: str) -> dict:
+    """Gửi prompt và nhận về JSON (Gemini ở chế độ trả JSON)."""
+    if client is None:
+        raise ChatbotError("Chưa cấu hình AI_API_KEY cho Gemini")
+
+    try:
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt,
+            config=genai.types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2),
+        )
+    except Exception as exc:
+        logger.exception("AI generation failed")
+        raise _generation_error(exc) from exc
+
+    try:
+        return json.loads(getattr(response, "text", None) or "")
+    except ValueError as exc:
+        raise ChatbotError("Gemini trả về kết quả không đúng định dạng") from exc

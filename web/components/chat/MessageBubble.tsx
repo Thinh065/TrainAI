@@ -21,6 +21,7 @@ import {
   oneLight,
 } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Check, Copy } from "lucide-react";
+import { ConsistencyReport } from "@/components/chat/ConsistencyReport";
 import { useChatApp } from "@/context/ChatAppContext";
 import type { Message, Source } from "@/lib/types";
 import { displayFileName } from "@/lib/utils";
@@ -164,6 +165,14 @@ export function MessageBubble({ message }: { message: Message }) {
         <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-card bg-raised px-4 py-2.5 text-[15px] leading-6 md:max-w-[75%]">
           {message.content}
         </div>
+      </article>
+    );
+  }
+
+  if (message.report) {
+    return (
+      <article aria-label="Kết quả kiểm tra của TrainAI">
+        <ConsistencyReport report={message.report} />
       </article>
     );
   }

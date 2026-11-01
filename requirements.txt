@@ -11,3 +11,6 @@ sentence-transformers
 google-genai
 
 pypdf
+requests
+python-pptx
+python-docx

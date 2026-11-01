@@ -1,7 +1,12 @@
 import type { ConversationDocument } from "@/lib/models/Conversation";
 import type { MessageDocument } from "@/lib/models/Message";
 import type { UserDocument } from "@/lib/models/User";
-import type { Conversation, Message, User } from "@/lib/types";
+import type {
+  ConsistencyReport,
+  Conversation,
+  Message,
+  User,
+} from "@/lib/types";
 
 export function serializeUser(doc: UserDocument): User {
   return {
@@ -38,5 +43,6 @@ export function serializeMessage(doc: MessageDocument): Message {
           })),
         }
       : {}),
+    ...(doc.report ? { report: doc.report as ConsistencyReport } : {}),
   };
 }

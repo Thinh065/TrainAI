@@ -119,3 +119,38 @@ export async function deleteDocumentApi(
   );
   await parseJson<{ deleted?: boolean }>(res);
 }
+
+export async function startConsistencyCheckApi(
+  conversationId: string,
+  url: string,
+): Promise<string> {
+  const res = await fetch(`/api/conversations/${conversationId}/consistency`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  const data = await parseJson<{ jobId: string }>(res);
+  return data.jobId;
+}
+
+export interface ConsistencyProgress {
+  status: "running" | "done" | "error";
+  stage?: "reading" | "checking" | "done";
+  sections?: number;
+  title?: string;
+  error?: string;
+  saved?: boolean;
+  conversation?: Conversation;
+  userMessage?: Message;
+  assistantMessage?: Message;
+}
+
+export async function fetchConsistencyProgressApi(
+  conversationId: string,
+  jobId: string,
+): Promise<ConsistencyProgress> {
+  const res = await fetch(
+    `/api/conversations/${conversationId}/consistency/${encodeURIComponent(jobId)}`,
+  );
+  return parseJson(res);
+}

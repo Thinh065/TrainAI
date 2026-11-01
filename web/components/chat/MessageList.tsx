@@ -10,6 +10,7 @@ export function MessageList() {
   const {
     activeMessages,
     pendingQuestion,
+    pendingStatus,
     isLoadingMessages,
     chatError,
     dismissChatError,
@@ -64,7 +65,7 @@ export function MessageList() {
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-faint [animation-delay:200ms]" />
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-faint [animation-delay:400ms]" />
                 </span>
-                Đang tìm trong tài liệu…
+                {pendingStatus}
               </div>
             )}
           </div>

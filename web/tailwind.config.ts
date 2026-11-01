@@ -28,6 +28,10 @@ const config: Config = {
           DEFAULT: "var(--cite)",
           soft: "var(--cite-soft)",
         },
+        warning: {
+          soft: "var(--warning-soft)",
+          ink: "var(--warning-ink)",
+        },
         danger: {
           DEFAULT: "var(--negative)",
           soft: "var(--negative-soft)",

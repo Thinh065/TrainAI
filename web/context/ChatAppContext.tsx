@@ -14,11 +14,13 @@ import {
   createConversationApi,
   deleteConversationApi,
   deleteDocumentApi,
+  fetchConsistencyProgressApi,
   fetchConversations,
   fetchCurrentUser,
   fetchDocumentsApi,
   fetchMessages,
   sendMessageApi,
+  startConsistencyCheckApi,
   updateConversationApi,
   uploadPdfApi,
 } from "@/lib/api-client";
@@ -54,6 +56,8 @@ interface ChatAppContextValue {
   isSending: boolean;
   /** The question waiting for an answer in the conversation on screen. */
   pendingQuestion: string | null;
+  /** What the pending request is doing right now, shown under it. */
+  pendingStatus: string | null;
   isLoadingHistory: boolean;
   isLoadingMessages: boolean;
   isLoadingDocuments: boolean;
@@ -70,6 +74,7 @@ interface ChatAppContextValue {
   renameConversation: (id: string, title: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
   sendMessage: (content: string) => Promise<boolean>;
+  checkConsistency: (url: string) => Promise<boolean>;
   dismissChatError: () => void;
   uploadPdf: (file: File) => Promise<void>;
   removeDocument: (id: string) => Promise<void>;
@@ -99,6 +104,7 @@ export function ChatAppProvider({ children }: { children: ReactNode }) {
   const [sending, setSending] = useState<{
     conversationId: string | null;
     content: string;
+    status: string;
   } | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
@@ -281,7 +287,11 @@ export function ChatAppProvider({ children }: { children: ReactNode }) {
       if (!trimmed || sending) return false;
 
       setChatError(null);
-      setSending({ conversationId: activeIdRef.current, content: trimmed });
+      setSending({
+        conversationId: activeIdRef.current,
+        content: trimmed,
+        status: "Đang tìm trong tài liệu…",
+      });
 
       let conversationId: string | null = null;
       try {
@@ -304,6 +314,75 @@ export function ChatAppProvider({ children }: { children: ReactNode }) {
           setChatError({
             message: errorMessage(e, "Không gửi được tin nhắn"),
           });
+        }
+        return false;
+      } finally {
+        setSending(null);
+      }
+    },
+    [ensureConversation, sending],
+  );
+
+  /** Đọc bài ở link và tìm chỗ nói không khớp nhau; chạy ở nền nên hỏi tiến độ định kỳ. */
+  const checkConsistency = useCallback(
+    async (url: string): Promise<boolean> => {
+      const trimmed = url.trim();
+      if (!trimmed || sending) return false;
+
+      setChatError(null);
+      setSending({
+        conversationId: activeIdRef.current,
+        content: `Kiểm tra độ nhất quán: ${trimmed}`,
+        status: "Đang đọc bài từ link…",
+      });
+
+      let conversationId: string | null = null;
+      try {
+        conversationId = await ensureConversation(`Kiểm tra: ${trimmed}`);
+        const target = conversationId;
+        setSending((prev) => prev && { ...prev, conversationId: target });
+        const jobId = await startConsistencyCheckApi(conversationId, trimmed);
+
+        const deadline = Date.now() + 15 * 60 * 1000;
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => window.setTimeout(resolve, 3000));
+          const progress = await fetchConsistencyProgressApi(target, jobId);
+          if (progress.status === "error") {
+            throw new Error(progress.error || "Không kiểm tra được bài này");
+          }
+          if (progress.status === "done") {
+            if (progress.conversation) {
+              const updated = progress.conversation;
+              setConversations((prev) => [
+                updated,
+                ...prev.filter((c) => c.id !== updated.id),
+              ]);
+            }
+            if (activeIdRef.current === target) {
+              if (progress.userMessage && progress.assistantMessage) {
+                const { userMessage, assistantMessage } = progress;
+                setActiveMessages((prev) => [...prev, userMessage, assistantMessage]);
+              } else {
+                setActiveMessages(await fetchMessages(target));
+              }
+            }
+            return true;
+          }
+          setSending(
+            (prev) =>
+              prev && {
+                ...prev,
+                status:
+                  progress.stage === "checking"
+                    ? `Đang so sánh ${progress.sections ?? ""} phần của “${progress.title ?? "bài"}” với nhau… thường mất 1–5 phút`
+                    : "Đang đọc bài từ link…",
+              },
+          );
+        }
+        throw new Error("Kiểm tra quá lâu (hơn 15 phút). Hãy thử lại.");
+      } catch (e) {
+        if (activeIdRef.current === conversationId) {
+          setChatError({ message: errorMessage(e, "Không kiểm tra được bài này") });
         }
         return false;
       } finally {
@@ -409,6 +488,10 @@ export function ChatAppProvider({ children }: { children: ReactNode }) {
       sending && sending.conversationId === activeConversationId
         ? sending.content
         : null,
+    pendingStatus:
+      sending && sending.conversationId === activeConversationId
+        ? sending.status
+        : null,
     isLoadingHistory,
     isLoadingMessages,
     isLoadingDocuments,
@@ -425,6 +508,7 @@ export function ChatAppProvider({ children }: { children: ReactNode }) {
     renameConversation,
     deleteConversation,
     sendMessage,
+    checkConsistency,
     dismissChatError,
     uploadPdf,
     removeDocument,

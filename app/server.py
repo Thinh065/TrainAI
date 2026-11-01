@@ -15,6 +15,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from app.chatbot import ChatbotError
+from app.consistency_jobs import get_job, start_job
 from app.mongo_store import create_conversation, get_conversation, get_conversations, get_files_for_conversation, get_messages
 from app.rag_service import answer_question, delete_conversation_data, delete_pdf, ingest_pdf, remove_local_file
 
@@ -168,6 +169,25 @@ def delete_conversation_file(conversation_id, file_id):
     except Exception as exc:
         logger.exception("Failed to delete PDF")
         return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/consistency", methods=["POST"])
+def start_consistency_check():
+    """Bắt đầu kiểm tra ở nền; trả job_id để hỏi tiến độ."""
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    user_id = (data.get("user_id") or "").strip()
+    if not url or not user_id:
+        return jsonify({"error": "url và user_id là bắt buộc"}), 400
+    return jsonify({"job_id": start_job(url, owner=user_id)}), 202
+
+
+@app.route("/api/consistency/<job_id>", methods=["GET"])
+def consistency_status(job_id):
+    job = get_job(job_id, owner=request.args.get("user_id", "").strip())
+    if job is None:
+        return jsonify({"error": "Không tìm thấy lượt kiểm tra (có thể máy chủ vừa khởi động lại)"}), 404
+    return jsonify(job)
 
 
 @app.route("/api/chat", methods=["POST"])

@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ArrowUp, Loader2, Paperclip } from "lucide-react";
+import { ArrowUp, ListChecks, Loader2, Paperclip } from "lucide-react";
 import { useChatApp } from "@/context/ChatAppContext";
 import { usePdfPicker } from "@/components/documents/usePdfPicker";
 import { cn } from "@/lib/utils";
 
 export function ChatInput() {
-  const { sendMessage, isSending, activeConversationId } = useChatApp();
+  const { sendMessage, checkConsistency, isSending, activeConversationId } =
+    useChatApp();
   const { openPicker, input } = usePdfPicker();
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -32,15 +33,17 @@ export function ChatInput() {
   }, [activeConversationId]);
 
   const canSend = value.trim().length > 0 && !isSending;
+  // A message that is only a link means "check this deck", not a question.
+  const isLink = /^https?:\/\/\S+$/i.test(value.trim());
 
   const submit = useCallback(async () => {
     if (!canSend) return;
     const text = value;
     setValue("");
-    const sent = await sendMessage(text);
+    const sent = isLink ? await checkConsistency(text) : await sendMessage(text);
     // Keep the question when sending failed, so it can be sent again.
     if (!sent) setValue((current) => current || text);
-  }, [canSend, sendMessage, value]);
+  }, [canSend, checkConsistency, isLink, sendMessage, value]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -72,7 +75,7 @@ export function ChatInput() {
             ref={textareaRef}
             rows={1}
             value={value}
-            placeholder="Hỏi về tài liệu của bạn…"
+            placeholder="Đặt câu hỏi hoặc dán link bài…"
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={onKeyDown}
             className="max-h-[200px] min-h-10 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] leading-5 outline-none placeholder:text-faint"
@@ -83,21 +86,34 @@ export function ChatInput() {
             onClick={submit}
             disabled={!canSend}
             className={cn(
-              "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-primary text-primary-ink transition-colors hover:bg-primary-hover active:translate-y-px",
+              "inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-control bg-primary text-primary-ink transition-colors hover:bg-primary-hover active:translate-y-px",
               "disabled:cursor-not-allowed disabled:bg-active disabled:text-faint",
+              isLink && !isSending ? "px-3.5 text-sm font-medium" : "w-10",
             )}
-            aria-label={isSending ? "Đang trả lời" : "Gửi câu hỏi"}
+            aria-label={
+              isSending
+                ? "Đang xử lý"
+                : isLink
+                  ? "Kiểm tra độ nhất quán"
+                  : "Gửi câu hỏi"
+            }
           >
             {isSending ? (
               <Loader2 className="h-[18px] w-[18px] animate-spin" />
+            ) : isLink ? (
+              <>
+                <ListChecks className="h-[18px] w-[18px]" />
+                Kiểm tra
+              </>
             ) : (
               <ArrowUp className="h-[18px] w-[18px]" />
             )}
           </button>
         </div>
         <p className="mt-2 text-center text-xs text-faint">
-          Enter để gửi, Shift + Enter để xuống dòng. Câu trả lời có thể sai, hãy
-          đối chiếu trang nguồn.
+          {isLink
+            ? "Enter để tìm chỗ nói không khớp trong bài ở link này (Canva, Google Slides/Docs, .docx, .pptx, .pdf)."
+            : "Enter để gửi, Shift + Enter để xuống dòng. Câu trả lời có thể sai, hãy đối chiếu trang nguồn."}
         </p>
       </div>
     </div>

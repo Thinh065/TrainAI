@@ -26,6 +26,8 @@
   --negative: #c4242a;
   --negative-soft: #ffedea;
   --negative-ink: #831c1e;
+  --warning-soft: #fff4dc;
+  --warning-ink: #8a4b00;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -49,6 +51,8 @@
     --negative: #e5566f;
     --negative-soft: #2c1a20;
     --negative-ink: #f08a9c;
+    --warning-soft: #2e2414;
+    --warning-ink: #f0b866;
   }
 }
 

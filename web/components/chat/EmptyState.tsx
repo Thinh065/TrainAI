@@ -1,6 +1,7 @@
 "use client";
 
-import { FileUp } from "lucide-react";
+import { useState, type FormEvent } from "react";
+import { FileUp, ListChecks } from "lucide-react";
 import { MAX_PDF_MB, useChatApp } from "@/context/ChatAppContext";
 import { usePdfPicker } from "@/components/documents/usePdfPicker";
 import { displayFileName } from "@/lib/utils";
@@ -67,8 +68,56 @@ export function EmptyState() {
           <p className="mt-4 text-sm text-muted">
             Hoặc hỏi ngay ở ô bên dưới; TrainAI sẽ nói rõ nếu chưa có tài liệu để trả lời.
           </p>
+          <LinkCheck />
         </>
       )}
     </div>
+  );
+}
+
+/** Second way in: paste a deck's link to find places where it contradicts itself. */
+function LinkCheck() {
+  const { checkConsistency, isSending } = useChatApp();
+  const [url, setUrl] = useState("");
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!url.trim()) return;
+    const value = url;
+    setUrl("");
+    if (!(await checkConsistency(value))) setUrl(value);
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="mt-8 rounded-card bg-raised p-5">
+      <h3 className="text-[15px] font-semibold">Kiểm tra bài nhóm có nói trước sau như một</h3>
+      <p className="mt-1 text-sm leading-6 text-muted" id="link-check-help">
+        Dán link bài đang để chế độ xem công khai: Canva, Google Slides, Google Docs, hoặc file
+        .docx, .pptx, .pdf. TrainAI đọc hết bài và chỉ ra slide nào nói ngược slide nào.
+      </p>
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+        <label htmlFor="link-check" className="sr-only">
+          Link bài cần kiểm tra
+        </label>
+        <input
+          id="link-check"
+          type="url"
+          inputMode="url"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://www.canva.com/design/…"
+          aria-describedby="link-check-help"
+          className="h-10 min-w-0 flex-1 rounded-control border border-control bg-surface px-3 text-sm outline-none placeholder:text-faint focus:border-ink"
+        />
+        <button
+          type="submit"
+          disabled={!url.trim() || isSending}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-control bg-primary px-4 text-sm font-medium text-primary-ink transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-active disabled:text-faint"
+        >
+          <ListChecks className="h-4 w-4" aria-hidden="true" />
+          Kiểm tra
+        </button>
+      </div>
+    </form>
   );
 }
