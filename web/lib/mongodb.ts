@@ -33,6 +33,8 @@ export async function connectDB(): Promise<typeof mongoose> {
   if (!cached.promise) {
     cached.promise = mongoose.connect(MONGODB_URI, {
       bufferCommands: false,
+      // Same database as the Python API; without it the URI's default ("test") was used.
+      dbName: process.env.MONGODB_DATABASE || "trainai",
     });
   }
 
