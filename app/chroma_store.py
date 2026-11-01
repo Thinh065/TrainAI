@@ -21,6 +21,8 @@ CHROMA_API_KEY = os.getenv("CHROMA_API_KEY")
 CHROMA_TENANT = os.getenv("CHROMA_TENANT")
 CHROMA_DATABASE = os.getenv("CHROMA_DATABASE", "Train")
 
+UPSERT_BATCH_SIZE = 250
+
 _client = None
 _collection = None
 
@@ -60,7 +62,15 @@ def add_documents(documents: List[str], embeddings: List[List[float]], metadata:
         f"{meta.get('conversation_id', 'conv')}-{meta.get('file_id', 'file')}-{meta.get('page_number', 0)}-{meta.get('chunk_index', idx)}"
         for idx, meta in enumerate(metadata)
     ]
-    collection.upsert(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadata)
+    # Chroma Cloud rejects more than 300 records per call, so long PDFs go in batches.
+    for start in range(0, len(ids), UPSERT_BATCH_SIZE):
+        end = start + UPSERT_BATCH_SIZE
+        collection.upsert(
+            ids=ids[start:end],
+            documents=documents[start:end],
+            embeddings=embeddings[start:end],
+            metadatas=metadata[start:end],
+        )
 
 
 def search_similar_documents(query_embedding: List[float], user_id: str, conversation_id: str | None = None, top_k: int = 5) -> List[Dict[str, Any]]:
@@ -90,40 +100,59 @@ def search_similar_documents(query_embedding: List[float], user_id: str, convers
     ]
 
 
+def _get_all(where: Dict[str, Any], include: List[str]) -> Dict[str, list]:
+    """collection.get theo từng trang: Chroma Cloud trả tối đa 300 bản ghi mỗi lần."""
+    collection = get_collection()
+    merged: Dict[str, list] = {"ids": [], "documents": [], "metadatas": []}
+    offset = 0
+    while True:
+        page = collection.get(where=where, include=include, limit=UPSERT_BATCH_SIZE, offset=offset)
+        ids = page.get("ids") or []
+        merged["ids"].extend(ids)
+        for key in ("documents", "metadatas"):
+            merged[key].extend(page.get(key) or [])
+        if len(ids) < UPSERT_BATCH_SIZE:
+            return merged
+        offset += len(ids)
+
+
+def _file_where(user_id: str, conversation_id: str, file_id: str) -> Dict[str, Any]:
+    return {
+        "$and": [
+            {"user_id": str(user_id)},
+            {"conversation_id": str(conversation_id)},
+            {"file_id": str(file_id)},
+        ]
+    }
+
+
+def get_conversation_documents(user_id: str, conversation_id: str) -> List[Dict[str, Any]]:
+    """Mọi đoạn của một cuộc trò chuyện, cho tìm theo từ khóa."""
+    records = _get_all(
+        {"$and": [{"user_id": str(user_id)}, {"conversation_id": str(conversation_id)}]},
+        include=["documents", "metadatas"],
+    )
+    return [
+        {"document": doc, "metadata": meta}
+        for doc, meta in zip(records["documents"], records["metadatas"])
+    ]
+
+
 def _delete_where(where: Dict[str, Any]) -> int:
     collection = get_collection()
     # "ids" is always returned and is not a valid include value.
-    records = collection.get(where=where, include=[])
-    ids = records.get("ids", [])
-    if ids:
-        collection.delete(ids=ids)
+    ids = _get_all(where, include=[])["ids"]
+    for start in range(0, len(ids), UPSERT_BATCH_SIZE):
+        collection.delete(ids=ids[start:start + UPSERT_BATCH_SIZE])
     return len(ids)
 
 
 def delete_documents_by_file_id(user_id: str, conversation_id: str, file_id: str) -> int:
-    return _delete_where(
-        {
-            "$and": [
-                {"user_id": str(user_id)},
-                {"conversation_id": str(conversation_id)},
-                {"file_id": str(file_id)},
-            ]
-        }
-    )
+    return _delete_where(_file_where(user_id, conversation_id, file_id))
 
 
 def count_documents_for_file(user_id: str, conversation_id: str, file_id: str) -> int:
-    records = get_collection().get(
-        where={
-            "$and": [
-                {"user_id": str(user_id)},
-                {"conversation_id": str(conversation_id)},
-                {"file_id": str(file_id)},
-            ]
-        },
-        include=[],
-    )
-    return len(records.get("ids", []))
+    return len(_get_all(_file_where(user_id, conversation_id, file_id), include=[])["ids"])
 
 
 def delete_documents_by_conversation(user_id: str, conversation_id: str) -> int:

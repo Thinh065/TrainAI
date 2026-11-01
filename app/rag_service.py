@@ -12,8 +12,9 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from app.chatbot import ask_chatbot
-from app.chroma_store import add_documents as add_chroma_documents, count_documents_for_file, delete_documents_by_conversation, delete_documents_by_file_id, search_similar_documents as search_chroma_documents
+from app.chroma_store import add_documents as add_chroma_documents, count_documents_for_file, delete_documents_by_conversation, delete_documents_by_file_id, get_conversation_documents, search_similar_documents as search_chroma_documents
 from app.embedding import create_embeddings, create_query_embedding
+from app.keyword_search import bm25_rank, reciprocal_rank_fusion
 from app.mongo_store import add_file_record, add_message, delete_conversation, delete_file_record, get_file_by_id, get_files_for_conversation, get_messages
 from app.pdf_processor import chunk_text, compute_file_id, extract_text_from_pdf
 
@@ -87,7 +88,12 @@ def ingest_pdf(user_id: str, conversation_id: str, pdf_path: str, file_name: str
         raise ValueError("No textual chunks were generated from the PDF")
 
     embeddings = create_embeddings(chunks)
-    add_chroma_documents(documents=chunks, embeddings=embeddings.tolist(), metadata=metadata)
+    try:
+        add_chroma_documents(documents=chunks, embeddings=embeddings.tolist(), metadata=metadata)
+    except Exception:
+        # A failed batch must not leave half a PDF searchable.
+        delete_documents_by_file_id(user_id, conversation_id, file_id)
+        raise
     if existing_file is None:
         add_file_record(user_id=user_id, conversation_id=conversation_id, file_name=file_name, file_path=pdf_path, file_id=file_id)
 
@@ -154,6 +160,34 @@ def _unique_sources(retrieved: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sources
 
 
+CONTEXT_PASSAGES = 8
+CANDIDATES_PER_METHOD = 20
+
+
+def _passage_key(meta: Dict[str, Any]) -> str:
+    return f"{meta.get('file_id')}-{meta.get('page_number')}-{meta.get('chunk_index')}"
+
+
+def retrieve_passages(user_id: str, conversation_id: str, question: str) -> List[Dict[str, Any]]:
+    """Tìm theo nghĩa (vector) và theo từ khóa (BM25), rồi gộp hai bảng xếp hạng.
+
+    Chỉ tìm theo nghĩa thì bỏ sót đoạn có đúng chữ trong câu hỏi
+    (năm, tên riêng, số liệu); từ khóa bù vào chỗ đó.
+    """
+    query_embedding = create_query_embedding(question)
+    by_meaning = search_chroma_documents(
+        query_embedding.tolist(), user_id=user_id, conversation_id=conversation_id, top_k=CANDIDATES_PER_METHOD
+    )
+    passages = get_conversation_documents(user_id, conversation_id)
+    by_keyword = [passages[i] for i in bm25_rank(question, [p["document"] for p in passages])[:CANDIDATES_PER_METHOD]]
+
+    pool = {_passage_key(p.get("metadata") or {}): p for p in by_meaning + by_keyword}
+    fused = reciprocal_rank_fusion(
+        [[_passage_key(p.get("metadata") or {}) for p in ranking] for ranking in (by_meaning, by_keyword)]
+    )
+    return [pool[key] for key in fused[:CONTEXT_PASSAGES]]
+
+
 def answer_question(user_id: str, conversation_id: str, question: str) -> Dict[str, Any]:
     if not question or not question.strip():
         raise ValueError("Question is required")
@@ -161,8 +195,7 @@ def answer_question(user_id: str, conversation_id: str, question: str) -> Dict[s
     history = get_messages(conversation_id, user_id)
     history_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history[-8:]])
 
-    query_embedding = create_query_embedding(question)
-    retrieved = search_chroma_documents(query_embedding.tolist(), user_id=user_id, conversation_id=conversation_id, top_k=4)
+    retrieved = retrieve_passages(user_id, conversation_id, question)
 
     context_items = []
     for item in retrieved:

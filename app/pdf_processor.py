@@ -18,7 +18,7 @@ def _normalize_text(raw_text: str) -> str:
     if raw_text is None:
         return ""
 
-    text = raw_text.replace("\r\n", "\n").replace("\r", "\n")
+    text = raw_text.replace("\r\n", "\n").replace("\r", "\n").replace("\xa0", " ")
     text = re.sub(r"\t+", " ", text)
     text = re.sub(r" +", " ", text)
     return text.strip()
@@ -80,37 +80,49 @@ def extract_text_from_pdf(pdf_path: str) -> List[Dict[str, str]]:
     return pages
 
 
+def _tail_words(text: str, max_chars: int) -> str:
+    """Phần cuối của đoạn, dài tối đa max_chars, không cắt giữa chữ."""
+    if not max_chars or len(text) <= max_chars:
+        return text if max_chars else ""
+    tail = text[-max_chars:]
+    return tail.split(" ", 1)[1] if " " in tail else tail
+
+
+def _split_words(text: str, chunk_size: int) -> List[str]:
+    """Chia một câu quá dài theo từ."""
+    pieces: List[str] = []
+    current = ""
+    for word in text.split():
+        if current and len(current) + len(word) + 1 > chunk_size:
+            pieces.append(current)
+            current = word
+        else:
+            current = f"{current} {word}".strip()
+    if current:
+        pieces.append(current)
+    return pieces
+
+
 def _split_long_text(text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
     if len(text) <= chunk_size:
         return [text]
 
-    sentences = re.split(r"(?<=\S[.!?])\s+", text)
-    chunks: List[str] = []
-    current_chunk = ""
-
-    for sentence in sentences:
+    # PDF text often has no blank lines, so line breaks also end a unit.
+    units: List[str] = []
+    for sentence in re.split(r"(?<=\S[.!?])\s+|\n+", text):
         sentence = sentence.strip()
         if not sentence:
             continue
+        units.extend(_split_words(sentence, chunk_size - chunk_overlap) if len(sentence) > chunk_size else [sentence])
 
-        if len(current_chunk) + len(sentence) + 1 <= chunk_size:
-            current_chunk = f"{current_chunk} {sentence}".strip()
+    chunks: List[str] = []
+    current_chunk = ""
+    for unit in units:
+        if len(current_chunk) + len(unit) + 1 <= chunk_size:
+            current_chunk = f"{current_chunk} {unit}".strip()
             continue
-
-        if current_chunk:
-            chunks.append(current_chunk)
-            overlap_text = current_chunk[-chunk_overlap:] if chunk_overlap and len(current_chunk) > chunk_overlap else current_chunk
-            current_chunk = f"{overlap_text} {sentence}".strip()
-        else:
-            if len(sentence) <= chunk_size:
-                current_chunk = sentence
-            else:
-                start = 0
-                while start < len(sentence):
-                    end = min(start + chunk_size, len(sentence))
-                    chunks.append(sentence[start:end].strip())
-                    start += chunk_size - chunk_overlap
-                current_chunk = ""
+        chunks.append(current_chunk)
+        current_chunk = f"{_tail_words(current_chunk, chunk_overlap)} {unit}".strip()
 
     if current_chunk:
         chunks.append(current_chunk)

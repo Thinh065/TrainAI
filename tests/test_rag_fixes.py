@@ -34,6 +34,32 @@ class ChromaStoreTests(unittest.TestCase):
         chroma_store.add_documents(["a"], [[0.1, 0.2]], [_meta("conv-b")])
         self.assertEqual(self.collection.count(), 2)
 
+    def test_long_pdf_is_written_in_batches_under_cloud_limit(self):
+        spy = mock.Mock(wraps=self.collection.upsert)
+        with mock.patch.object(self.collection, "upsert", spy):
+            n = 327
+            chroma_store.add_documents(
+                [f"d{i}" for i in range(n)],
+                [[0.1, 0.2]] * n,
+                [_meta("conv-a", chunk=i) for i in range(n)],
+            )
+        self.assertTrue(all(len(c.kwargs["ids"]) <= 300 for c in spy.call_args_list))
+        self.assertEqual(self.collection.count(), 327)
+
+    def test_reads_and_deletes_more_than_one_page(self):
+        n = 327
+        chroma_store.add_documents(
+            [f"d{i}" for i in range(n)],
+            [[0.1, 0.2]] * n,
+            [_meta("conv-a", chunk=i) for i in range(n)],
+        )
+        spy = mock.Mock(wraps=self.collection.get)
+        with mock.patch.object(self.collection, "get", spy):
+            self.assertEqual(len(chroma_store.get_conversation_documents("user-1", "conv-a")), n)
+            self.assertEqual(chroma_store.delete_documents_by_file_id("user-1", "conv-a", "file-1"), n)
+        self.assertTrue(all(c.kwargs["limit"] <= 300 for c in spy.call_args_list))
+        self.assertEqual(self.collection.count(), 0)
+
     def test_search_does_not_leak_other_conversations(self):
         chroma_store.add_documents(["a"], [[0.1, 0.2]], [_meta("conv-a")])
         results = chroma_store.search_similar_documents([0.1, 0.2], user_id="user-1", conversation_id="conv-b", top_k=4)
@@ -76,7 +102,12 @@ class ReindexTests(unittest.TestCase):
                 open(path, "wb").close()
             record = {"file_path": kept}
             pages = [{"page_number": 1, "text": "Hoc phi 2.450.000 dong."}]
-            with mock.patch.object(rag_service, "get_file_by_id", return_value=record),                     mock.patch.object(rag_service, "count_documents_for_file", return_value=0),                     mock.patch.object(rag_service, "extract_text_from_pdf", return_value=pages) as extract,                     mock.patch.object(rag_service, "create_embeddings", return_value=mock.Mock(tolist=lambda: [[0.1]])),                     mock.patch.object(rag_service, "add_chroma_documents") as add_docs,                     mock.patch.object(rag_service, "add_file_record") as add_record:
+            with mock.patch.object(rag_service, "get_file_by_id", return_value=record), \
+                    mock.patch.object(rag_service, "count_documents_for_file", return_value=0), \
+                    mock.patch.object(rag_service, "extract_text_from_pdf", return_value=pages) as extract, \
+                    mock.patch.object(rag_service, "create_embeddings", return_value=mock.Mock(tolist=lambda: [[0.1]])), \
+                    mock.patch.object(rag_service, "add_chroma_documents") as add_docs, \
+                    mock.patch.object(rag_service, "add_file_record") as add_record:
                 result = rag_service.ingest_pdf("u", "c", fresh, "a.pdf", file_id="f1")
 
             self.assertEqual(result["chunks_indexed"], 1)
