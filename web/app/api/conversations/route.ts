@@ -4,13 +4,14 @@ import {
   ConversationModel,
   type ConversationDocument,
 } from "@/lib/models/Conversation";
-import { getDefaultUser } from "@/lib/server/default-user";
+import { getCurrentUser, unauthorized } from "@/lib/server/auth";
 import { serializeConversation } from "@/lib/server/serialize";
 
 export async function GET() {
   try {
     await connectDB();
-    const user = await getDefaultUser();
+    const user = await getCurrentUser();
+    if (!user) return unauthorized();
     const docs = await ConversationModel.find({ userId: user._id })
       .sort({ updatedAt: -1 })
       .lean();
@@ -32,7 +33,8 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     await connectDB();
-    const user = await getDefaultUser();
+    const user = await getCurrentUser();
+    if (!user) return unauthorized();
     const body = (await request.json().catch(() => ({}))) as {
       title?: string;
     };

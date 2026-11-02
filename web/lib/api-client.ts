@@ -2,6 +2,10 @@ import type { Conversation, Document, Message, User } from "@/lib/types";
 
 async function parseJson<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => ({}));
+  // Session gone (expired, signed out elsewhere): back to the sign-in page.
+  if (res.status === 401 && typeof window !== "undefined") {
+    window.location.assign("/login");
+  }
   if (!res.ok) {
     const message =
       typeof (data as { error?: string }).error === "string"
@@ -153,4 +157,37 @@ export async function fetchConsistencyProgressApi(
     `/api/conversations/${conversationId}/consistency/${encodeURIComponent(jobId)}`,
   );
   return parseJson(res);
+}
+
+export async function signInApi(email: string, password: string): Promise<User> {
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  return parseAuth(res);
+}
+
+export async function signUpApi(
+  name: string,
+  email: string,
+  password: string,
+): Promise<User> {
+  const res = await fetch("/api/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, email, password }),
+  });
+  return parseAuth(res);
+}
+
+export async function signOutApi(): Promise<void> {
+  await fetch("/api/auth/logout", { method: "POST" });
+}
+
+/** Like parseJson, but a 401 here means a wrong password, not an expired session. */
+async function parseAuth(res: Response): Promise<User> {
+  const data = (await res.json().catch(() => ({}))) as User & { error?: string };
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
 }

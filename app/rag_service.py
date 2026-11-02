@@ -188,12 +188,31 @@ def retrieve_passages(user_id: str, conversation_id: str, question: str) -> List
     return [pool[key] for key in fused[:CONTEXT_PASSAGES]]
 
 
-def answer_question(user_id: str, conversation_id: str, question: str) -> Dict[str, Any]:
+HISTORY_MESSAGES = 8
+HISTORY_CHARS_PER_MESSAGE = 2000
+
+
+def answer_question(
+    user_id: str,
+    conversation_id: str,
+    question: str,
+    history: List[Dict[str, str]] | None = None,
+) -> Dict[str, Any]:
+    """Trả lời từ PDF của cuộc trò chuyện.
+
+    `history` do web gửi kèm (nơi lưu tin nhắn chính). Không có thì dùng lịch sử
+    Python tự lưu, cho các lệnh chạy riêng như app/main.py.
+    """
     if not question or not question.strip():
         raise ValueError("Question is required")
 
-    history = get_messages(conversation_id, user_id)
-    history_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history[-8:]])
+    caller_owns_history = history is not None
+    if history is None:
+        history = get_messages(conversation_id, user_id)
+    history_text = "\n".join(
+        f"{msg.get('role')}: {str(msg.get('content', ''))[:HISTORY_CHARS_PER_MESSAGE]}"
+        for msg in history[-HISTORY_MESSAGES:]
+    )
 
     retrieved = retrieve_passages(user_id, conversation_id, question)
 
@@ -217,6 +236,7 @@ Yêu cầu định dạng:
 - Sử dụng định dạng tiêu đề, danh sách, bảng, mã, hoặc in đậm nếu cần.
 - Kết quả phải tương thích với ReactMarkdown và remark-gfm.
 - Không cần liệt kê lại nguồn ở cuối; giao diện tự hiển thị nguồn.
+- Không dùng LaTeX hay ký hiệu $...$ (giao diện không hiển thị được). Viết phép tính bằng ký hiệu thường, ví dụ: 1.650.000 × 9 = 14.850.000 đồng.
 
 Lịch sử hội thoại:
 {history_text}
@@ -230,8 +250,9 @@ Câu hỏi:
 
     answer = ask_chatbot(prompt)
 
-    add_message(conversation_id=conversation_id, user_id=user_id, role="user", content=question)
-    add_message(conversation_id=conversation_id, user_id=user_id, role="assistant", content=answer)
+    if not caller_owns_history:
+        add_message(conversation_id=conversation_id, user_id=user_id, role="user", content=question)
+        add_message(conversation_id=conversation_id, user_id=user_id, role="assistant", content=answer)
 
     return {
         "answer": answer,

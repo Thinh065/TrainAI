@@ -15,6 +15,7 @@ export function DocumentsPanel({ className }: DocumentsPanelProps) {
   const {
     documents,
     documentsError,
+    documentsNotice,
     isLoadingDocuments,
     activeConversationId,
     setDocsOpen,
@@ -47,6 +48,11 @@ export function DocumentsPanel({ className }: DocumentsPanelProps) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+        {documentsNotice && (
+          <p role="status" className="mb-2 rounded-control bg-raised px-3 py-2 text-xs leading-5">
+            {documentsNotice}
+          </p>
+        )}
         {documentsError && (
           <p
             role="alert"

@@ -20,6 +20,7 @@ export async function getAssistantReply(
   question: string,
   userId: string,
   conversationId: string,
+  history: { role: string; content: string }[] = [],
 ): Promise<AssistantReply> {
   const res = await fetchPython("/api/chat", {
     method: "POST",
@@ -28,6 +29,7 @@ export async function getAssistantReply(
       user_id: userId,
       conversation_id: conversationId,
       message: question,
+      history,
     }),
   });
   const data = await readPythonJson(res);

@@ -130,6 +130,27 @@ const markdownComponents: Components = {
   ),
 };
 
+const LATEX_SYMBOLS: Record<string, string> = {
+  times: "×",
+  div: "÷",
+  cdot: "·",
+  approx: "≈",
+  le: "≤",
+  ge: "≥",
+  neq: "≠",
+  pm: "±",
+};
+
+/** "$1.650.000 \times 9$" -> "1.650.000 × 9". Only spans holding a LaTeX command, so "$5" stays. */
+export function plainMath(text: string): string {
+  return text.replace(/\$\$?([^$\n]*\\[a-zA-Z]+[^$\n]*)\$\$?/g, (_, inner: string) =>
+    inner
+      .replace(/\\([a-zA-Z]+)/g, (cmd: string, name: string) => LATEX_SYMBOLS[name] ?? cmd)
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
+}
+
 function Sources({ sources }: { sources: Source[] }) {
   const { showSource } = useChatApp();
   return (
@@ -181,7 +202,7 @@ export function MessageBubble({ message }: { message: Message }) {
     <article className="group" aria-label="Câu trả lời của TrainAI">
       <div className="answer">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-          {message.content}
+          {plainMath(message.content)}
         </ReactMarkdown>
       </div>
       {message.sources && message.sources.length > 0 && (

@@ -1,10 +1,10 @@
+import hmac
 import logging
 import os
 import re
 import sys
 import uuid
 from pathlib import Path
-from flask_cors import CORS
 
 from flask import Flask, jsonify, request
 from dotenv import load_dotenv
@@ -29,8 +29,26 @@ UPLOAD_DIR = os.path.join(BASE_DIR, "data", "uploads")
 Path(UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
-CORS(app)
-MAX_UPLOAD_MB = 16
+# No CORS: only the Next.js server talks to this API, never the browser.
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "16"))
+
+# Shared secret with the Next.js server. The API trusts the user_id it is sent,
+# so nobody else may call it.
+INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "")
+_PUBLIC_PATHS = {"/", "/api/health"}
+
+if not INTERNAL_API_KEY:
+    logger.warning("INTERNAL_API_KEY is not set: the API only listens on 127.0.0.1 and accepts any local caller.")
+
+
+@app.before_request
+def require_internal_key():
+    if request.path in _PUBLIC_PATHS or not INTERNAL_API_KEY:
+        return None
+    sent = request.headers.get("X-Internal-Key", "")
+    if not hmac.compare_digest(sent.encode(), INTERNAL_API_KEY.encode()):
+        return jsonify({"error": "Unauthorized"}), 401
+    return None
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 
 # Ids end up in filesystem paths, so only allow plain id characters.
@@ -201,7 +219,10 @@ def api_chat():
         return jsonify({"error": "user_id, conversation_id, and message are required"}), 400
 
     try:
-        result = answer_question(user_id=user_id, conversation_id=conversation_id, question=message)
+        history = data.get("history")
+        if history is not None and not isinstance(history, list):
+            return jsonify({"error": "history must be a list"}), 400
+        result = answer_question(user_id=user_id, conversation_id=conversation_id, question=message, history=history)
         return jsonify(result)
     except PermissionError as exc:
         return jsonify({"error": str(exc)}), 403
@@ -222,8 +243,10 @@ def list_messages(conversation_id):
 
 
 if __name__ == "__main__":
+    # Local only by default; set HOST=0.0.0.0 (with INTERNAL_API_KEY) to serve another machine.
     app.run(
-        host="0.0.0.0",
+        host=os.environ.get("HOST", "127.0.0.1"),
         port=int(os.environ.get("PORT", 8501)),
-        debug=False
+        debug=False,
+        threaded=True,
     )

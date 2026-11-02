@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 import { connectDB } from "@/lib/mongodb";
 import { ConversationModel } from "@/lib/models/Conversation";
 import { MessageModel } from "@/lib/models/Message";
-import { getDefaultUser } from "@/lib/server/default-user";
+import { getCurrentUser, unauthorized } from "@/lib/server/auth";
 import { fetchPython, readPythonJson } from "@/lib/server/python-api";
 import { serializeConversation } from "@/lib/server/serialize";
 
@@ -23,7 +23,8 @@ export async function PATCH(request: Request, context: RouteContext) {
   try {
     const { id } = await context.params;
     await connectDB();
-    const user = await getDefaultUser();
+    const user = await getCurrentUser();
+    if (!user) return unauthorized();
     const conv = await getOwnedConversation(id, user._id);
 
     if (!conv) {
@@ -61,7 +62,8 @@ export async function DELETE(_request: Request, context: RouteContext) {
   try {
     const { id } = await context.params;
     await connectDB();
-    const user = await getDefaultUser();
+    const user = await getCurrentUser();
+    if (!user) return unauthorized();
     const conv = await getOwnedConversation(id, user._id);
 
     if (!conv) {

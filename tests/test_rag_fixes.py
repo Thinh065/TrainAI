@@ -123,9 +123,10 @@ class UploadRouteTests(unittest.TestCase):
         self.client = server.app.test_client()
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        patcher = mock.patch.object(server, "UPLOAD_DIR", tmp.name)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name, value in (("UPLOAD_DIR", tmp.name), ("INTERNAL_API_KEY", "")):
+            patcher = mock.patch.object(server, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def _upload(self, user_id, conversation_id="conv1"):
         return self.client.post(
@@ -154,6 +155,48 @@ class UploadRouteTests(unittest.TestCase):
         with mock.patch.object(server, "answer_question", side_effect=server.ChatbotError("down")):
             response = self.client.post("/api/chat", json={"user_id": "u", "conversation_id": "c", "message": "hi"})
         self.assertEqual(response.status_code, 502)
+
+
+class GeminiRetryTests(unittest.TestCase):
+    def test_overload_is_retried_then_answered(self):
+        from app import chatbot
+
+        fake = mock.Mock()
+        fake.models.generate_content.side_effect = [Exception("503 UNAVAILABLE"), mock.Mock(text=" Đáp án ")]
+        with mock.patch.object(chatbot, "client", fake), mock.patch.object(chatbot.time, "sleep"):
+            self.assertEqual(chatbot.ask_chatbot("hỏi"), "Đáp án")
+        self.assertEqual(fake.models.generate_content.call_count, 2)
+
+    def test_daily_quota_is_not_retried_and_reads_clearly(self):
+        from app import chatbot
+
+        fake = mock.Mock()
+        fake.models.generate_content.side_effect = Exception("429 RESOURCE_EXHAUSTED GenerateRequestsPerDayPerProject")
+        with mock.patch.object(chatbot, "client", fake), mock.patch.object(chatbot.time, "sleep"):
+            with self.assertRaisesRegex(chatbot.ChatbotError, "hết lượt miễn phí"):
+                chatbot.ask_chatbot("hỏi")
+        self.assertEqual(fake.models.generate_content.call_count, 1)
+
+
+class InternalKeyTests(unittest.TestCase):
+    def setUp(self):
+        self.client = server.app.test_client()
+        patcher = mock.patch.object(server, "INTERNAL_API_KEY", "s3cret")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_calls_without_the_key_are_refused(self):
+        self.assertEqual(self.client.get("/api/conversations?user_id=u").status_code, 401)
+        self.assertEqual(
+            self.client.get("/api/conversations/c/files?user_id=u", headers={"X-Internal-Key": "wrong"}).status_code,
+            401,
+        )
+
+    def test_health_stays_open_and_the_right_key_passes(self):
+        self.assertEqual(self.client.get("/api/health").status_code, 200)
+        with mock.patch.object(server, "get_files_for_conversation", return_value=[]):
+            response = self.client.get("/api/conversations/c/files?user_id=u", headers={"X-Internal-Key": "s3cret"})
+        self.assertEqual(response.status_code, 200)
 
 
 if __name__ == "__main__":

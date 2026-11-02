@@ -16,6 +16,7 @@ export async function POST(request: Request) {
   }
 
   return proxyToPython(
+    conversationId,
     () => `/api/conversations/${encodeURIComponent(conversationId)}/files`,
     "Không xử lý được PDF",
     // The owner comes from the server session, never from the browser.

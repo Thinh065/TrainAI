@@ -64,6 +64,8 @@ interface ChatAppContextValue {
   historyError: string | null;
   chatError: ChatError | null;
   documentsError: string | null;
+  /** Short note about the last upload, e.g. the PDF was already there. */
+  documentsNotice: string | null;
   highlightedDocId: string | null;
   showSource: (fileId: string) => void;
   toggleSidebar: () => void;
@@ -112,6 +114,7 @@ export function ChatAppProvider({ children }: { children: ReactNode }) {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [chatError, setChatError] = useState<ChatError | null>(null);
   const [documentsError, setDocumentsError] = useState<string | null>(null);
+  const [documentsNotice, setDocumentsNotice] = useState<string | null>(null);
   const [highlightedDocId, setHighlightedDocId] = useState<string | null>(
     null,
   );
@@ -424,7 +427,11 @@ export function ChatAppProvider({ children }: { children: ReactNode }) {
       setDocuments((prev) => [base, ...prev]);
       try {
         const conversationId = await ensureConversation(file.name);
-        await uploadPdfApi(conversationId, file);
+        const result = await uploadPdfApi(conversationId, file);
+        if (result.already_indexed) {
+          setDocumentsNotice(`“${file.name}” đã có trong cuộc trò chuyện này, không cần thêm lại.`);
+          window.setTimeout(() => setDocumentsNotice(null), 6000);
+        }
         if (activeIdRef.current !== conversationId) return;
         setDocuments((prev) => prev.filter((d) => d.id !== docId));
         await loadDocuments(conversationId);
@@ -498,6 +505,7 @@ export function ChatAppProvider({ children }: { children: ReactNode }) {
     historyError,
     chatError,
     documentsError,
+    documentsNotice,
     highlightedDocId,
     showSource,
     toggleSidebar,

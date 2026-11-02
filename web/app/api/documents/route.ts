@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
-import { getDefaultUser } from "@/lib/server/default-user";
+import { getCurrentUser, unauthorized } from "@/lib/server/auth";
 import {
+  conversationNotFound,
   fetchPython,
+  ownsConversation,
   pythonErrorMessage,
   readPythonJson,
 } from "@/lib/server/python-api";
@@ -43,7 +45,11 @@ export async function GET(request: Request) {
   }
 
   try {
-    const user = await getDefaultUser();
+    const user = await getCurrentUser();
+    if (!user) return unauthorized();
+    if (!(await ownsConversation(user._id, conversationId))) {
+      return conversationNotFound();
+    }
     const userId = user._id.toString();
     const res = await fetchPython(
       `/api/conversations/${encodeURIComponent(conversationId)}/files?user_id=${encodeURIComponent(userId)}`,

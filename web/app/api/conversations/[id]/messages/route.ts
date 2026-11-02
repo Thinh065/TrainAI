@@ -7,7 +7,7 @@ import {
   getAssistantReply,
   type AssistantReply,
 } from "@/lib/server/assistant";
-import { getDefaultUser } from "@/lib/server/default-user";
+import { getCurrentUser, unauthorized } from "@/lib/server/auth";
 import { errorMessage, shortTitle } from "@/lib/utils";
 import {
   serializeConversation,
@@ -24,7 +24,8 @@ export async function GET(_request: Request, context: RouteContext) {
     }
 
     await connectDB();
-    const user = await getDefaultUser();
+    const user = await getCurrentUser();
+    if (!user) return unauthorized();
     const conv = await ConversationModel.findOne({
       _id: id,
       userId: user._id,
@@ -71,7 +72,8 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     await connectDB();
-    const user = await getDefaultUser();
+    const user = await getCurrentUser();
+    if (!user) return unauthorized();
     const conv = await ConversationModel.findOne({
       _id: id,
       userId: user._id,
@@ -86,7 +88,20 @@ export async function POST(request: Request, context: RouteContext) {
     // Ask first, save after: a failed answer must not leave an orphan question.
     let reply: AssistantReply;
     try {
-      reply = await getAssistantReply(content, user._id.toString(), id);
+      // The web app owns the history; Python only reads it for context.
+      const recent = await MessageModel.find({ conversationId: conv._id })
+        .sort({ createdAt: -1 })
+        .limit(8)
+        .lean();
+      const history = recent
+        .reverse()
+        .map((m) => ({ role: m.role, content: m.content }));
+      reply = await getAssistantReply(
+        content,
+        user._id.toString(),
+        id,
+        history,
+      );
     } catch (e) {
       console.error("Python API chat failed:", e);
       return NextResponse.json(

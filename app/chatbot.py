@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sys
+import time
 import google.genai as genai
 from dotenv import load_dotenv
 
@@ -38,7 +39,33 @@ def _generation_error(exc: Exception) -> ChatbotError:
         return ChatbotError("Gemini đang giới hạn số lượt mỗi phút. Đợi khoảng một phút rồi thử lại.")
     if "503" in text or "UNAVAILABLE" in text:
         return ChatbotError("Gemini đang quá tải. Thử lại sau ít phút.")
+    if "timed out" in text.lower() or "timeout" in type(exc).__name__.lower():
+        return ChatbotError("Gemini trả lời quá lâu nên đã dừng. Thử lại, hoặc đổi AI_MODEL_NAME sang model nhanh hơn.")
     return ChatbotError(f"Gemini không trả lời được: {text[:300]}")
+
+
+RETRY_DELAYS_SECONDS = (2, 5)
+# Without a timeout a stuck request hangs forever and the user waits on "searching…".
+CHAT_TIMEOUT_SECONDS = int(os.getenv("AI_CHAT_TIMEOUT", "120"))
+REVIEW_TIMEOUT_SECONDS = int(os.getenv("AI_REVIEW_TIMEOUT", "600"))
+
+
+def _is_overloaded(exc: Exception) -> bool:
+    text = str(exc)
+    return "503" in text or "UNAVAILABLE" in text
+
+
+def _generate(**kwargs):
+    """generate_content, thử lại khi Gemini báo quá tải tạm thời (503)."""
+    for delay in RETRY_DELAYS_SECONDS:
+        try:
+            return client.models.generate_content(model=MODEL_NAME, **kwargs)
+        except Exception as exc:
+            if not _is_overloaded(exc):
+                raise
+            logger.warning("Gemini overloaded, retrying in %ss", delay)
+            time.sleep(delay)
+    return client.models.generate_content(model=MODEL_NAME, **kwargs)
 
 
 def ask_chatbot(prompt_or_question, relevant_chunks=None):
@@ -67,7 +94,12 @@ Câu trả lời:
         raise ChatbotError("Chưa cấu hình AI_API_KEY cho Gemini")
 
     try:
-        response = client.models.generate_content(model=MODEL_NAME, contents=prompt_content)
+        response = _generate(
+            contents=prompt_content,
+            config=genai.types.GenerateContentConfig(
+                http_options=genai.types.HttpOptions(timeout=CHAT_TIMEOUT_SECONDS * 1000),
+            ),
+        )
     except Exception as exc:
         logger.exception("AI generation failed")
         raise _generation_error(exc) from exc
@@ -84,10 +116,13 @@ def ask_chatbot_json(prompt: str) -> dict:
         raise ChatbotError("Chưa cấu hình AI_API_KEY cho Gemini")
 
     try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
+        response = _generate(
             contents=prompt,
-            config=genai.types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2),
+            config=genai.types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.2,
+                http_options=genai.types.HttpOptions(timeout=REVIEW_TIMEOUT_SECONDS * 1000),
+            ),
         )
     except Exception as exc:
         logger.exception("AI generation failed")

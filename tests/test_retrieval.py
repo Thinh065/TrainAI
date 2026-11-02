@@ -55,5 +55,27 @@ class RetrievePassagesTests(unittest.TestCase):
         self.assertIn(99, [p["metadata"]["page_number"] for p in result])
 
 
+class AnswerHistoryTests(unittest.TestCase):
+    def _answer(self, history):
+        with mock.patch.object(rag_service, "retrieve_passages", return_value=[]), \
+                mock.patch.object(rag_service, "get_messages", return_value=[{"role": "user", "content": "cũ"}]) as stored, \
+                mock.patch.object(rag_service, "ask_chatbot", return_value="Trả lời") as ask, \
+                mock.patch.object(rag_service, "add_message") as add:
+            rag_service.answer_question("u", "c", "Câu hỏi?", history=history)
+        return stored, ask.call_args.args[0], add
+
+    def test_history_from_web_is_used_and_not_stored_again(self):
+        stored, prompt, add = self._answer([{"role": "assistant", "content": "Độ nhất quán: 53/100"}])
+        stored.assert_not_called()
+        add.assert_not_called()
+        self.assertIn("Độ nhất quán: 53/100", prompt)
+
+    def test_without_history_python_keeps_its_own(self):
+        stored, prompt, add = self._answer(None)
+        stored.assert_called_once()
+        self.assertEqual(add.call_count, 2)
+        self.assertIn("user: cũ", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

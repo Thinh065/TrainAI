@@ -14,6 +14,7 @@ export async function DELETE(request: Request, context: RouteContext) {
   const { documentId } = await context.params;
 
   return proxyToPython(
+    conversationId,
     (userId) =>
       `/api/conversations/${encodeURIComponent(conversationId)}/files/${encodeURIComponent(documentId)}?user_id=${encodeURIComponent(userId)}`,
     "Không xóa được PDF",
